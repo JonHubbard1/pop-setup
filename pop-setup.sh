@@ -183,10 +183,20 @@ install_desktop_apps() {
     log_info "Installing desktop applications..."
 
     # Web Browser - Install Chrome and set as default
+    CHROME_SOURCE="/etc/apt/sources.list.d/chrome.list"
+
+    # Fix existing Chrome repo with conflicting Signed-By value
+    if [[ -f "$CHROME_SOURCE" ]]; then
+        if grep -q "Signed-By" "$CHROME_SOURCE" && ! grep -q "signed-by=/usr/share/keyrings/chrome.gpg" "$CHROME_SOURCE" 2>/dev/null; then
+            log_info "Fixing Chrome repository Signed-By conflict..."
+            sudo rm -f "$CHROME_SOURCE"
+        fi
+    fi
+
     if ! command -v google-chrome &> /dev/null; then
         log_info "Adding Chrome repository..."
-        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/chrome.gpg
-        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/chrome.list
+        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/chrome.gpg 2>/dev/null || true
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee "$CHROME_SOURCE"
         sudo apt update
         sudo apt install -y google-chrome-stable
         log_success "Google Chrome installed"
