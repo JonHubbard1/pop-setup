@@ -597,13 +597,13 @@ setup_login_check() {
     mkdir -p "$HOME/.config/systemd/user"
 
     # Create the login check script
-    cat > "$HOME/.config/systemd/user/pop-setup-check.sh" << 'CHECKSCRIPT'
+    cat > "$HOME/.config/systemd/user/pop-setup-check.sh" << CHECKSCRIPT
 #!/usr/bin/env bash
 # Pop Setup Login Update Check
 
 DELAY_FILE="$HOME/.pop-setup-delay-count"
 SCRIPT_PATH="$HOME/pop-setup.sh"
-SCRIPT_URL="https://raw.githubusercontent.com/yourusername/pop-setup/main/pop-setup.sh"
+SCRIPT_URL="$SCRIPT_URL"
 
 # Check if script exists
 if [[ ! -f "$SCRIPT_PATH" ]]; then
