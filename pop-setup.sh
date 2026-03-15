@@ -22,7 +22,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # GitHub configuration - Update these to your repo
-GITHUB_REPO="yourusername/pop-setup"
+GITHUB_REPO="JonHubbard1/pop-setup"
 GITHUB_BRANCH="main"
 SCRIPT_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/pop-setup.sh"
 
