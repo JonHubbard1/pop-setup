@@ -2,6 +2,29 @@
 
 Reproducible laptop setup for Pop!_OS with automatic update checking.
 
+## Quick Install
+
+### New Laptop Setup
+
+Run this single command on any new Pop OS laptop:
+
+```bash
+curl -sL https://raw.githubusercontent.com/JonHubbard1/pop-setup/main/pop-setup.sh -o ~/pop-setup.sh && chmod +x ~/pop-setup.sh && ./pop-setup.sh
+```
+
+Or download and run separately:
+
+```bash
+# Download the script
+curl -sL https://raw.githubusercontent.com/JonHubbard1/pop-setup/main/pop-setup.sh -o ~/pop-setup.sh
+
+# Make executable
+chmod +x ~/pop-setup.sh
+
+# Run setup
+./pop-setup.sh
+```
+
 ## Features
 
 - **System Updates**: Full apt update/upgrade
@@ -13,25 +36,6 @@ Reproducible laptop setup for Pop!_OS with automatic update checking.
 - **Dock Icons**: Pinned shortcuts for Microsoft 365, Outlook, Teams, etc.
 - **Auto-update**: Checks GitHub on each login (max 3 delays)
 
-## Quick Start
-
-### First-time Setup
-
-```bash
-# Download and run
-curl -sL https://raw.githubusercontent.com/yourusername/pop-setup/main/pop-setup.sh -o ~/pop-setup.sh
-chmod +x ~/pop-setup.sh
-./pop-setup.sh
-```
-
-### Enable Login Update Check
-
-```bash
-./pop-setup.sh --setup-login
-```
-
-This configures a systemd service that checks for updates on every login.
-
 ## Update Commands
 
 | Command | Description |
@@ -42,29 +46,54 @@ This configures a systemd service that checks for updates on every login.
 | `./pop-setup.sh --setup-login` | Configure login-time update check |
 | `./pop-setup.sh --reset-delay` | Reset the delay counter |
 
-## GitHub Hosting
+## GitHub Repository
 
-1. Create a new repository on GitHub:
-   ```
-   Repository name: pop-setup
-   Visibility: Public (or Private for org use)
-   ```
+### Public vs Private
 
-2. Push the script:
-   ```bash
-   cd ~/pop-setup
-   git init
-   git add pop-setup.sh README.md
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin https://github.com/yourusername/pop-setup.git
-   git push -u origin main
-   ```
+**Public Repository** (current setup):
+- Anyone can view the code
+- Laptops can fetch updates via HTTPS without authentication
+- Updates work automatically
 
-3. Update the `GITHUB_REPO` variable in `pop-setup.sh`:
-   ```bash
-   GITHUB_REPO="yourusername/pop-setup"
-   ```
+**Private Repository**:
+- Code is private to your organization
+- Requires authentication (SSH key or Personal Access Token)
+- To use private repo, laptops need:
+  1. SSH key added to GitHub account, OR
+  2. Personal Access Token configured
+
+To switch to private repo:
+1. Create private repo on GitHub
+2. Push code: `git remote set-url origin git@github.com:JonHubbard1/pop-setup.git && git push`
+3. Update `GITHUB_REPO` in script
+4. Ensure each laptop has SSH access
+
+### Security Considerations
+
+This script is **safe and auditable**:
+
+- **No hidden commands**: All operations are visible in the script
+- **No network callbacks**: Only fetches from your GitHub repo
+- **No credentials stored**: Uses sudo prompts, doesn't store passwords
+- **Backups created**: Existing configs are backed up before changes
+- **Idempotent**: Safe to run multiple times
+- **Reviewable**: Code is public for anyone to audit
+
+**What the script does NOT do:**
+- Phone home or beacon to external servers
+- Store or transmit credentials
+- Download code from untrusted sources
+- Modify system files outside expected paths
+- Disable security features
+
+**To verify safety:**
+```bash
+# Review the script before running
+cat ~/pop-setup.sh | less
+
+# Or view on GitHub
+https://github.com/JonHubbard1/pop-setup/main/pop-setup.sh
+```
 
 ## Update Flow
 
@@ -84,7 +113,7 @@ Edit the script to customize:
 - **Websites**: Modify the `websites` array in `configure_dock_icons()`
 - **Apps**: Add packages to `install_desktop_apps()`
 - **Power**: Adjust profiles in `configure_power()`
-- **Auto-launch**: Change URL in `configure_autnologin()`
+- **Auto-launch**: Change URL in `configure_autologin()`
 
 ## Files Created
 
@@ -101,6 +130,7 @@ Edit the script to customize:
 - Auto-login requires **full disk encryption** (enable during Pop OS install)
 - Script never runs as root (uses sudo for privileged operations)
 - Backups created before modifying configs
+- All operations are logged and reversible
 
 ## License
 
