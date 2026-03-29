@@ -97,7 +97,7 @@ install_chrome() {
     fi
 
     if ! command -v google-chrome &> /dev/null; then
-        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/chrome.gpg 2>/dev/null || true
+        curl -sL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/chrome.gpg 2>/dev/null || true
         echo "deb [arch=amd64 signed-by=/usr/share/keyrings/chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee "$CHROME_SOURCE"
         sudo apt update
         sudo apt install -y google-chrome-stable
@@ -519,6 +519,13 @@ reset_delay() {
 }
 
 prompt_update() {
+    # If running non-interactively (e.g. from systemd), auto-apply
+    if [[ ! -t 0 ]]; then
+        log_info "Non-interactive session — auto-applying update..."
+        apply_update
+        return
+    fi
+
     local delays_remaining=$((MAX_DELAYS - $(get_delay_count)))
 
     echo ""
@@ -575,8 +582,15 @@ apply_update() {
     reset_delay
 
     log_success "Script updated!"
-    log_info "Running updated script..."
-    exec "$HOME/pop-setup.sh"
+
+    if [[ -t 0 ]]; then
+        # Interactive — re-run the updated script with full setup
+        log_info "Running updated script..."
+        exec "$HOME/pop-setup.sh"
+    else
+        # Non-interactive (systemd) — just update the file, don't re-run
+        log_info "Update applied. Full setup will run on next manual execution."
+    fi
 }
 
 setup_login_check() {
