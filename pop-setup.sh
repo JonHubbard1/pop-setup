@@ -109,6 +109,13 @@ fix_chrome_repo() {
     [[ "$dominated" == "true" ]] && log_info "Cleaned up conflicting Chrome repo entries"
 }
 
+install_prerequisites() {
+    log_info "Installing prerequisites..."
+    sudo apt update
+    sudo apt install -y curl jq
+    log_success "Prerequisites installed"
+}
+
 update_system() {
     log_info "Updating system packages..."
     fix_chrome_repo
@@ -942,6 +949,7 @@ main() {
     log_info "Starting kiosk setup..."
     echo
 
+    install_prerequisites
     update_system
     install_chrome
     configure_chrome_policies
