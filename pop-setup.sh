@@ -76,8 +76,29 @@ backup_config() {
 # ============================================================
 # 1. System Updates
 # ============================================================
+fix_chrome_repo() {
+    # Chrome's installer can add its own .list / .sources files that conflict
+    # with the one we create. Clean up any conflicting entries before apt update.
+    local dominated=false
+    for f in /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/google-chrome*.sources; do
+        [[ -f "$f" ]] || continue
+        if [[ "$f" != "/etc/apt/sources.list.d/chrome.list" ]]; then
+            sudo rm -f "$f"
+            dominated=true
+        fi
+    done
+    if [[ -f "/etc/apt/sources.list.d/chrome.list" ]]; then
+        if grep -q "Signed-By" "/etc/apt/sources.list.d/chrome.list" && ! grep -q "signed-by=/usr/share/keyrings/chrome.gpg" "/etc/apt/sources.list.d/chrome.list" 2>/dev/null; then
+            sudo rm -f "/etc/apt/sources.list.d/chrome.list"
+            dominated=true
+        fi
+    fi
+    [[ "$dominated" == "true" ]] && log_info "Cleaned up conflicting Chrome repo entries"
+}
+
 update_system() {
     log_info "Updating system packages..."
+    fix_chrome_repo
     sudo apt update
     sudo apt upgrade -y
     sudo apt autoremove -y
