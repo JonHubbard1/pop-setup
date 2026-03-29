@@ -375,7 +375,7 @@
                 <li>Open a terminal (press <strong>Ctrl + Alt + T</strong> or search for "Terminal")</li>
                 <li>Copy and paste this command, then press Enter:
                     <div class="setup-command" onclick="copyCommand(this)" title="Click to copy">
-                        wget -qO- popos.4youth.org.uk/go | bash
+                        wget -qO - https://popos.4youth.org.uk/go | bash
                         <span class="copy-hint">click to copy</span>
                     </div>
                 </li>
@@ -709,7 +709,7 @@
     }
 
     function copyCommand(el) {
-        const command = 'wget -qO- popos.4youth.org.uk/go | bash';
+        const command = 'wget -qO - https://popos.4youth.org.uk/go | bash';
         navigator.clipboard.writeText(command).then(() => {
             el.classList.add('copied');
             el.querySelector('.copy-hint').textContent = 'copied!';
