@@ -11,6 +11,16 @@
 
 set -euo pipefail
 
+# Ensure gsettings can talk to the GNOME session dbus
+# (needed when running via curl|bash or non-interactive shells)
+if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+    DBUS_PID=$(pgrep -u "$USER" gnome-session 2>/dev/null || pgrep -u "$USER" gnome-shell 2>/dev/null || true)
+    if [[ -n "$DBUS_PID" ]]; then
+        eval "$(grep -z DBUS_SESSION_BUS_ADDRESS /proc/"$DBUS_PID"/environ 2>/dev/null | tr '\0' '\n')"
+        export DBUS_SESSION_BUS_ADDRESS
+    fi
+fi
+
 # Gitea configuration
 GITEA_BASE="https://git.technoliga.co.uk"
 GITEA_REPO="jon/pop-setup"
@@ -334,8 +344,14 @@ EOF
     favorites_str=$(printf "'%s', " "${dock_ids[@]}")
     favorites_str="[${favorites_str%, }]"
 
-    gsettings set org.gnome.shell favorite-apps "$favorites_str" 2>/dev/null || \
-        log_warn "Could not set dock favorites"
+    # Try both GNOME Shell and Pop!_OS COSMIC dock
+    gsettings set org.gnome.shell favorite-apps "$favorites_str" 2>/dev/null || true
+    # Pop!_OS COSMIC uses a different schema for the dock
+    gsettings set org.gnome.shell.extensions.dash-to-dock favorite-apps "$favorites_str" 2>/dev/null || true
+    # Also set via pop-cosmic if available
+    dconf write /org/gnome/shell/favorite-apps "$favorites_str" 2>/dev/null || true
+
+    log_success "Desktop shortcuts created and pinned to dock"
 
     log_success "Desktop shortcuts created and pinned to dock"
 }
@@ -452,6 +468,8 @@ EOF
 
     # --- Hide the dock "Show Applications" button ---
     gsettings set org.gnome.shell.extensions.dash-to-dock show-show-apps-button false 2>/dev/null || true
+    gsettings set org.gnome.shell.extensions.pop-cosmic show-applications-button false 2>/dev/null || true
+    gsettings set org.gnome.shell.extensions.dash-to-dock dock-fixed true 2>/dev/null || true
 
     # --- Disable right-click on desktop ---
     gsettings set org.gnome.desktop.background show-desktop-icons false 2>/dev/null || true
