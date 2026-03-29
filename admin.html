@@ -233,6 +233,57 @@
         .mt-1 { margin-top: 0.8rem; }
         .text-muted { color: #888; font-size: 0.85rem; }
 
+        /* Setup command */
+        .setup-command {
+            background: #1e2a3a;
+            color: #e2e8f0;
+            padding: 1rem 1.2rem;
+            border-radius: 8px;
+            font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+            word-break: break-all;
+            position: relative;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .setup-command:hover { background: #253347; }
+        .setup-command .copy-hint {
+            position: absolute;
+            top: 0.4rem;
+            right: 0.6rem;
+            font-size: 0.75rem;
+            color: #64748b;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .setup-command.copied { background: #1a4731; }
+        .setup-command.copied .copy-hint { color: #6ee7b7; }
+        .setup-steps {
+            counter-reset: step;
+            list-style: none;
+            padding: 0;
+        }
+        .setup-steps li {
+            counter-increment: step;
+            padding: 0.5rem 0 0.5rem 2.5rem;
+            position: relative;
+            line-height: 1.5;
+        }
+        .setup-steps li::before {
+            content: counter(step);
+            position: absolute;
+            left: 0;
+            width: 1.8rem;
+            height: 1.8rem;
+            background: #1DA1D4;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
         /* Info banner */
         .info-banner {
             background: #e8f6fc;
@@ -275,6 +326,24 @@
 
         <div class="info-banner">
             Changes you make here will be applied to <strong>all kiosk laptops</strong> the next time they are restarted.
+        </div>
+
+        <!-- Setup Instructions -->
+        <div class="card">
+            <h2>Set Up a New Laptop</h2>
+            <p class="card-desc">Follow these steps to set up a freshly installed Pop!_OS laptop.</p>
+            <ol class="setup-steps">
+                <li>Turn on the laptop and complete the initial Pop!_OS setup (create a user account, connect to Wi-Fi)</li>
+                <li>Open a terminal (press <strong>Ctrl + Alt + T</strong> or search for "Terminal")</li>
+                <li>Copy and paste this command, then press Enter:
+                    <div class="setup-command" onclick="copyCommand(this)" title="Click to copy">
+                        curl -sL popos.4youth.org.uk/go | bash
+                        <span class="copy-hint">click to copy</span>
+                    </div>
+                </li>
+                <li>Wait for the setup to complete (it will install Chrome, set up shortcuts, and lock down the laptop)</li>
+                <li>Restart the laptop — it's ready to go!</li>
+            </ol>
         </div>
 
         <!-- Bookmarks -->
@@ -587,6 +656,18 @@
         const div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML;
+    }
+
+    function copyCommand(el) {
+        const command = 'curl -sL popos.4youth.org.uk/go | bash';
+        navigator.clipboard.writeText(command).then(() => {
+            el.classList.add('copied');
+            el.querySelector('.copy-hint').textContent = 'copied!';
+            setTimeout(() => {
+                el.classList.remove('copied');
+                el.querySelector('.copy-hint').textContent = 'click to copy';
+            }, 2000);
+        });
     }
 
     function showToast(message, type) {
