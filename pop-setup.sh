@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Pop!_OS Kiosk Setup Script for 4Youth
+# Ubuntu 24.04 LTS Kiosk Setup Script for 4Youth
 #
-# Locks down a Pop!_OS laptop so the user can only use Chrome
+# Locks down an Ubuntu GNOME laptop so the user can only use Chrome
 # with shortcuts to approved websites. Auto-login, no terminal,
 # no file manager, no settings access.
 #
@@ -21,13 +21,16 @@ if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
     fi
 fi
 
-# Gitea configuration
+# Forgejo configuration
 GITEA_BASE="https://git.technoliga.co.uk"
 GITEA_REPO="jon/pop-setup"
 GITEA_BRANCH="main"
 SCRIPT_URL="${GITEA_BASE}/${GITEA_REPO}/raw/branch/${GITEA_BRANCH}/pop-setup.sh"
 CONFIG_URL="${GITEA_BASE}/${GITEA_REPO}/raw/branch/${GITEA_BRANCH}/config.json"
 ASSETS_URL="${GITEA_BASE}/${GITEA_REPO}/raw/branch/${GITEA_BRANCH}/icons"
+
+# Device tracking API
+DEVICE_API="https://popos.4youth.org.uk/api.php"
 
 # Local install paths for assets
 ICON_DIR="/usr/share/icons/4youth"
@@ -64,9 +67,9 @@ check_not_root() {
     fi
 }
 
-check_pop_os() {
-    if [[ ! -f /etc/pop-os/os-release ]]; then
-        log_warn "This script is designed for Pop!_OS. Detected: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2)"
+check_ubuntu() {
+    if ! grep -qi 'ubuntu' /etc/os-release 2>/dev/null; then
+        log_warn "This script is designed for Ubuntu 24.04 LTS. Detected: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2)"
         read -p "Continue anyway? (y/n): " -n 1 -r
         echo
         [[ $REPLY =~ ^[Yy]$ ]] || exit 1
@@ -149,16 +152,31 @@ install_chrome() {
 }
 
 # ============================================================
-# 3. Configure Power Management
+# 3. Configure Chrome Managed Policies
+# ============================================================
+configure_chrome_policies() {
+    log_info "Configuring Chrome managed policies..."
+
+    sudo mkdir -p /etc/opt/chrome/policies/managed
+    sudo tee /etc/opt/chrome/policies/managed/4youth-policy.json > /dev/null << 'EOF'
+{
+    "PasswordManagerEnabled": false,
+    "AutofillCreditCardEnabled": false,
+    "AutofillAddressEnabled": false,
+    "BrowserSigninMode": 0,
+    "SyncDisabled": true,
+    "IncognitoModeAvailability": 1
+}
+EOF
+
+    log_success "Chrome policies configured (password saving disabled, sync disabled)"
+}
+
+# ============================================================
+# 4. Configure Power Management
 # ============================================================
 configure_power() {
     log_info "Configuring power management..."
-
-    if command -v system76-power &> /dev/null; then
-        sudo system76-power profile battery 2>/dev/null && \
-            log_info "Power profile set to battery" || \
-            log_warn "Could not set power profile (VM or unsupported hardware)"
-    fi
 
     if ! command -v tlp &> /dev/null; then
         sudo apt install -y tlp tlp-rdw
@@ -169,7 +187,7 @@ configure_power() {
 }
 
 # ============================================================
-# 4. Configure Auto-login
+# 5. Configure Auto-login
 # ============================================================
 configure_autologin() {
     log_info "Configuring auto-login..."
@@ -195,7 +213,7 @@ configure_autologin() {
 }
 
 # ============================================================
-# 5. Download Config & Install Assets
+# 6. Download Config & Install Assets
 # ============================================================
 download_config() {
     log_info "Downloading configuration..."
@@ -274,7 +292,7 @@ install_assets() {
 }
 
 # ============================================================
-# 6. Create Desktop Shortcuts (the 5 icons)
+# 7. Create Desktop Shortcuts (the dock icons)
 # ============================================================
 create_desktop_shortcuts() {
     log_info "Creating desktop shortcuts..."
@@ -344,20 +362,13 @@ EOF
     favorites_str=$(printf "'%s', " "${dock_ids[@]}")
     favorites_str="[${favorites_str%, }]"
 
-    # Try both GNOME Shell and Pop!_OS COSMIC dock
     gsettings set org.gnome.shell favorite-apps "$favorites_str" 2>/dev/null || true
-    # Pop!_OS COSMIC uses a different schema for the dock
-    gsettings set org.gnome.shell.extensions.dash-to-dock favorite-apps "$favorites_str" 2>/dev/null || true
-    # Also set via pop-cosmic if available
-    dconf write /org/gnome/shell/favorite-apps "$favorites_str" 2>/dev/null || true
-
-    log_success "Desktop shortcuts created and pinned to dock"
 
     log_success "Desktop shortcuts created and pinned to dock"
 }
 
 # ============================================================
-# 7. Lock Down the Desktop
+# 8. Lock Down the Desktop
 # ============================================================
 lockdown_desktop() {
     log_info "Locking down desktop environment..."
@@ -372,16 +383,13 @@ lockdown_desktop() {
         # Terminals
         "org.gnome.Terminal.desktop"
         "io.elementary.terminal.desktop"
-        "com.system76.CosmicTerm.desktop"
+        "gnome-terminal.desktop"
         # File managers
         "org.gnome.Nautilus.desktop"
-        "io.elementary.files.desktop"
-        "com.system76.CosmicFiles.desktop"
+        "nautilus.desktop"
         # Settings
         "gnome-control-center.desktop"
         "org.gnome.Settings.desktop"
-        "com.system76.CosmicSettings.desktop"
-        "io.elementary.switchboard.desktop"
         # System tools
         "org.gnome.DiskUtility.desktop"
         "org.gnome.SystemMonitor.desktop"
@@ -396,10 +404,9 @@ lockdown_desktop() {
         "org.gnome.gedit.desktop"
         "gedit.desktop"
         # Software center
-        "io.elementary.appcenter.desktop"
         "org.gnome.Software.desktop"
-        "pop-cosmic-applications.desktop"
-        "repoman.desktop"
+        "snap-store_snap-store.desktop"
+        "snap-store_ubuntu-software.desktop"
         # Other pre-installed apps
         "org.gnome.Calculator.desktop"
         "org.gnome.Calendar.desktop"
@@ -421,8 +428,10 @@ lockdown_desktop() {
         "libreoffice-math.desktop"
         "firefox.desktop"
         "firefox-esr.desktop"
-        "com.system76.Popsicle.desktop"
-        "firmware-manager.desktop"
+        "thunderbird.desktop"
+        "org.gnome.Rhythmbox3.desktop"
+        "org.gnome.Shotwell.desktop"
+        "transmission-gtk.desktop"
     )
 
     for app in "${hide_apps[@]}"; do
@@ -440,9 +449,7 @@ EOF
 
     # --- Disable keyboard shortcuts that could bypass lockdown ---
 
-    # Disable terminal shortcut (Ctrl+Alt+T is not set by default in GNOME
-    # but some Pop!_OS configs add it via custom keybindings)
-    local custom_keys="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings"
+    # Disable terminal shortcut and custom keybindings
     gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "[]" 2>/dev/null || true
 
     # Disable overview/activities (Super key) — prevents app search
@@ -468,7 +475,6 @@ EOF
 
     # --- Hide the dock "Show Applications" button ---
     gsettings set org.gnome.shell.extensions.dash-to-dock show-show-apps-button false 2>/dev/null || true
-    gsettings set org.gnome.shell.extensions.pop-cosmic show-applications-button false 2>/dev/null || true
     gsettings set org.gnome.shell.extensions.dash-to-dock dock-fixed true 2>/dev/null || true
 
     # --- Disable right-click on desktop ---
@@ -494,7 +500,7 @@ EOF
 }
 
 # ============================================================
-# 8. Disable Unnecessary Services
+# 9. Disable Unnecessary Services
 # ============================================================
 disable_unnecessary_services() {
     log_info "Disabling unnecessary services..."
@@ -507,7 +513,7 @@ disable_unnecessary_services() {
 }
 
 # ============================================================
-# 9. Set Wallpaper (clean branded desktop)
+# 10. Set Wallpaper (clean branded desktop)
 # ============================================================
 set_wallpaper() {
     log_info "Setting desktop wallpaper..."
@@ -531,7 +537,7 @@ set_wallpaper() {
 }
 
 # ============================================================
-# 10. Display Team Message
+# 11. Display Team Message
 # ============================================================
 setup_team_message() {
     log_info "Setting up team message..."
@@ -614,6 +620,63 @@ X-GNOME-Autostart-enabled=true
 EOF
 
     log_success "Team message configured"
+}
+
+# ============================================================
+# 12. Device Registration (boot tracking via SQLite API)
+# ============================================================
+register_device() {
+    log_info "Registering device..."
+
+    if ! command -v dmidecode &> /dev/null; then
+        sudo apt install -y dmidecode
+    fi
+
+    local machine_id
+    machine_id=$(cat /etc/machine-id 2>/dev/null || echo "unknown")
+
+    if [[ "$machine_id" == "unknown" ]]; then
+        log_warn "Could not read /etc/machine-id — skipping device registration"
+        return
+    fi
+
+    # Gather hardware info
+    local hostname_val cpu_model ram_gb disk_gb mac_addr serial_number os_version
+    hostname_val=$(hostname 2>/dev/null || echo "unknown")
+    cpu_model=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | sed 's/^ //' || echo "unknown")
+    ram_gb=$(awk '/MemTotal/ {printf "%.1f", $2/1048576}' /proc/meminfo 2>/dev/null || echo "0")
+    local disk_bytes
+    disk_bytes=$(lsblk -b -d -n -o SIZE /dev/sda 2>/dev/null || lsblk -b -d -n -o SIZE /dev/nvme0n1 2>/dev/null || echo "0")
+    if [[ "$disk_bytes" =~ ^[0-9]+$ ]] && [[ "$disk_bytes" -gt 0 ]]; then
+        disk_gb=$((disk_bytes / 1073741824))
+    else
+        disk_gb=0
+    fi
+    mac_addr=$(ip link show 2>/dev/null | awk '/ether/ {print $2; exit}' || echo "unknown")
+    serial_number=$(sudo dmidecode -s system-serial-number 2>/dev/null || echo "unknown")
+    os_version=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "unknown")
+
+    # POST to device tracking API
+    local api_response
+    api_response=$(curl -sL -X POST "https://popos.4youth.org.uk/api.php?action=register" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"secret\": \"4youth-kiosk-2026\",
+            \"machine_id\": \"${machine_id}\",
+            \"hostname\": \"${hostname_val}\",
+            \"cpu\": \"${cpu_model}\",
+            \"ram_gb\": ${ram_gb},
+            \"disk_gb\": ${disk_gb},
+            \"mac_address\": \"${mac_addr}\",
+            \"serial\": \"${serial_number}\",
+            \"os_version\": \"${os_version}\"
+        }" 2>/dev/null || echo "")
+
+    if echo "$api_response" | grep -q '"status":"ok"'; then
+        log_success "Device registered: ${hostname_val} (${machine_id:0:8}...)"
+    else
+        log_warn "Device registration failed (network issue?) — will retry on next boot"
+    fi
 }
 
 # ============================================================
@@ -769,7 +832,7 @@ EOF
 # ============================================================
 usage() {
     cat << EOF
-4Youth Pop!_OS Kiosk Setup Script
+4Youth Ubuntu Kiosk Setup Script
 
 Usage: $0 [OPTIONS]
 
@@ -816,6 +879,10 @@ unlock_desktop() {
 
     # Remove polkit restriction
     sudo rm -f /etc/polkit-1/localauthority/50-local.d/50-restrict-settings.pkla 2>/dev/null || true
+
+    # Remove Chrome managed policies
+    sudo rm -f /etc/opt/chrome/policies/managed/4youth-policy.json 2>/dev/null || true
+    log_info "Removed Chrome managed policies"
 
     log_success "Desktop unlocked. Log out and back in for full effect."
 }
@@ -864,19 +931,20 @@ main() {
     done
 
     echo "========================================"
-    echo "  4Youth Pop!_OS Kiosk Setup"
+    echo "  4Youth Ubuntu Kiosk Setup"
     echo "  $(date)"
     echo "========================================"
     echo
 
     check_not_root
-    check_pop_os
+    check_ubuntu
 
     log_info "Starting kiosk setup..."
     echo
 
     update_system
     install_chrome
+    configure_chrome_policies
     configure_power
     configure_autologin
     download_config
@@ -886,6 +954,7 @@ main() {
     disable_unnecessary_services
     set_wallpaper
     setup_team_message
+    register_device
     setup_login_check
 
     echo
@@ -895,6 +964,8 @@ main() {
     echo "  - Auto-login on power on"
     echo "  - Show dock shortcuts configured in config.json"
     echo "  - Hide all other apps, settings, terminal, and file manager"
+    echo "  - Prevent Chrome password saving and autofill"
+    echo "  - Register device and track boots via Forgejo"
     echo ""
     echo "To temporarily unlock for admin maintenance:"
     echo "  ./pop-setup.sh --unlock"

@@ -284,6 +284,44 @@
             font-weight: 600;
         }
 
+        /* Laptop list */
+        .laptop-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.8rem;
+            padding: 0.8rem;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            background: #fafafa;
+        }
+        .laptop-status {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-top: 0.35rem;
+            flex-shrink: 0;
+        }
+        .laptop-status.active { background: #27ae60; }
+        .laptop-status.inactive { background: #bdc3c7; }
+        .laptop-info { flex: 1; }
+        .laptop-hostname { font-weight: 600; font-size: 0.95rem; }
+        .laptop-details { font-size: 0.82rem; color: #666; margin-top: 0.2rem; line-height: 1.5; }
+        .laptop-meta { font-size: 0.78rem; color: #999; margin-top: 0.25rem; }
+        .laptops-empty {
+            text-align: center;
+            padding: 2rem 1rem;
+            color: #999;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+        .laptops-loading {
+            text-align: center;
+            padding: 1.5rem;
+            color: #999;
+            font-size: 0.9rem;
+        }
+
         /* Info banner */
         .info-banner {
             background: #e8f6fc;
@@ -402,6 +440,15 @@
             </div>
         </div>
 
+        <!-- Registered Laptops -->
+        <div class="card">
+            <h2>Registered Laptops</h2>
+            <p class="card-desc">Laptops that have been set up with the setup script. This list updates automatically.</p>
+            <div id="laptop-list">
+                <div class="laptops-loading">Loading devices...</div>
+            </div>
+        </div>
+
     </div>
 </div>
 
@@ -417,11 +464,11 @@
 
 <script>
     // --- Pre-configured connection (no need for users to know these details) ---
-    // API calls are proxied through nginx to avoid CORS issues
-    // When served from popos.4youth.org.uk, /api/ proxies to git.technoliga.co.uk/api/
+    // Forgejo API calls are proxied through nginx at /forgejo-api/ to avoid CORS
     // When opened as a local file, fall back to direct Forgejo URL
     const isLocal = window.location.protocol === 'file:';
-    const SERVER_URL = isLocal ? 'https://git.technoliga.co.uk' : '';
+    const SERVER_URL = isLocal ? 'https://git.technoliga.co.uk' : '/forgejo-api';
+    const DEVICE_API = isLocal ? 'https://popos.4youth.org.uk' : '';
     const REPO_PATH = 'jon/pop-setup';
     const API_TOKEN = '616e513aca743fd235e7fc54d7fe498a260d940e';
 
@@ -449,6 +496,7 @@
             if (!response.ok) throw new Error('Could not connect');
 
             await loadConfig();
+            loadDevices();
 
             document.getElementById('login-panel').style.display = 'none';
             document.getElementById('admin-panel').style.display = 'block';
@@ -471,13 +519,15 @@
     // --- API helpers ---
 
     function apiGet(path) {
-        return fetch(`${SERVER_URL}/api/v1${path}`, {
+        const base = isLocal ? `${SERVER_URL}/api/v1` : `${SERVER_URL}/v1`;
+        return fetch(`${base}${path}`, {
             headers: { 'Authorization': `token ${API_TOKEN}` }
         });
     }
 
     function apiPut(path, body) {
-        return fetch(`${SERVER_URL}/api/v1${path}`, {
+        const base = isLocal ? `${SERVER_URL}/api/v1` : `${SERVER_URL}/v1`;
+        return fetch(`${base}${path}`, {
             method: 'PUT',
             headers: {
                 'Authorization': `token ${API_TOKEN}`,
@@ -675,6 +725,76 @@
         toast.textContent = message;
         toast.className = `toast ${type} visible`;
         setTimeout(() => toast.classList.remove('visible'), 3000);
+    }
+
+    // --- Devices ---
+
+    function timeAgo(dateString) {
+        const now = new Date();
+        const date = new Date(dateString);
+        const seconds = Math.floor((now - date) / 1000);
+
+        if (seconds < 0) return 'just now';
+        if (seconds < 60) return 'just now';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return minutes + ' minute' + (minutes !== 1 ? 's' : '') + ' ago';
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return hours + ' hour' + (hours !== 1 ? 's' : '') + ' ago';
+        const days = Math.floor(hours / 24);
+        if (days < 30) return days + ' day' + (days !== 1 ? 's' : '') + ' ago';
+        return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    async function loadDevices() {
+        const container = document.getElementById('laptop-list');
+        container.innerHTML = '<div class="laptops-loading">Loading devices...</div>';
+
+        try {
+            const response = await fetch(`${DEVICE_API}/api.php?action=devices`);
+            if (!response.ok) throw new Error('Could not load devices');
+
+            const devices = await response.json();
+
+            if (devices.length === 0) {
+                container.innerHTML = '<div class="laptops-empty">No laptops registered yet.<br>Run the setup script on a laptop to see it here.</div>';
+                return;
+            }
+
+            container.innerHTML = '';
+            const now = new Date();
+
+            devices.forEach(device => {
+                const lastBootDate = device.last_boot ? new Date(device.last_boot + 'Z') : null;
+                const isRecent = lastBootDate && (now - lastBootDate) < 24 * 60 * 60 * 1000;
+
+                const div = document.createElement('div');
+                div.className = 'laptop-item';
+                div.innerHTML = `
+                    <div class="laptop-status ${isRecent ? 'active' : 'inactive'}" title="${isRecent ? 'Booted in the last 24 hours' : 'Not seen recently'}"></div>
+                    <div class="laptop-info">
+                        <div class="laptop-hostname">${escapeHtml(device.hostname || 'Unknown')}</div>
+                        <div class="laptop-details">
+                            ${device.cpu ? escapeHtml(device.cpu) : 'Unknown CPU'}
+                            &middot; ${device.ram_gb ? device.ram_gb + ' GB RAM' : '? RAM'}
+                            &middot; ${device.disk_gb ? device.disk_gb + ' GB disk' : '? disk'}
+                            ${device.os_version ? '<br>' + escapeHtml(device.os_version) : ''}
+                        </div>
+                        <div class="laptop-meta">
+                            ${device.mac_address ? 'MAC: ' + escapeHtml(device.mac_address) : ''}
+                            ${device.serial ? ' &middot; Serial: ' + escapeHtml(device.serial) : ''}
+                            <br>
+                            ${device.last_boot ? 'Last seen: ' + timeAgo(device.last_boot + 'Z') : 'Never booted'}
+                            ${device.last_ip ? ' (IP: ' + escapeHtml(device.last_ip) + ')' : ''}
+                            &middot; ${device.boot_count || 0} boot${device.boot_count !== 1 ? 's' : ''} total
+                        </div>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+
+        } catch (e) {
+            container.innerHTML = '<div class="laptops-empty">Could not load device list.</div>';
+        }
     }
 
     // --- Auto-restore session ---
