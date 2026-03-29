@@ -1,200 +1,102 @@
 #!/usr/bin/env bash
 #
-# Pop OS Setup Script
-# Reproducible laptop setup for Pop!_OS
+# Pop!_OS Kiosk Setup Script for 4Youth
 #
-# Usage: ./pop-setup.sh
+# Locks down a Pop!_OS laptop so the user can only use Chrome
+# with shortcuts to approved websites. Auto-login, no terminal,
+# no file manager, no settings access.
 #
-# This script:
-# - Updates system packages
-# - Installs desktop applications
-# - Configures Pop OS power management, scheduler, and GPU settings
-# - Backs up and applies dotfiles/configs
+# Usage: ./pop-setup.sh [OPTIONS]
 #
 
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Gitea configuration
+GITEA_BASE="https://git.technoliga.co.uk"
+GITEA_REPO="jon/pop-setup"
+GITEA_BRANCH="main"
+SCRIPT_URL="${GITEA_BASE}/${GITEA_REPO}/raw/branch/${GITEA_BRANCH}/pop-setup.sh"
+ASSETS_URL="${GITEA_BASE}/${GITEA_REPO}/raw/branch/${GITEA_BRANCH}/icons"
 
-# GitHub configuration - Update these to your repo
-GITHUB_REPO="JonHubbard1/pop-setup"
-GITHUB_BRANCH="main"
-SCRIPT_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/pop-setup.sh"
+# Local install paths for assets
+ICON_DIR="/usr/share/icons/4youth"
+WALLPAPER_DIR="/usr/share/backgrounds/4youth"
+
+# 4Youth brand colour (from logo)
+BRAND_COLOUR="#1DA1D4"
 
 # Delay tracking
 MAX_DELAYS=3
 DELAY_FILE="$HOME/.pop-setup-delay-count"
+SKIP_FILE="$HOME/.pop-setup-skipped-version"
 
-# Logging functions
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Logging
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# Check if running as root
-check_root() {
+# Safety checks
+check_not_root() {
     if [[ $EUID -eq 0 ]]; then
-        log_error "Do not run this script as root. Use sudo when needed."
+        log_error "Do not run this script as root. Run as the target user with sudo access."
         exit 1
     fi
 }
 
-# Check if running on Pop OS
 check_pop_os() {
     if [[ ! -f /etc/pop-os/os-release ]]; then
-        log_warn "This script is designed for Pop!_OS. Detected: $(cat /etc/os-release | grep PRETTY_NAME | cut -d= -f2)"
+        log_warn "This script is designed for Pop!_OS. Detected: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2)"
         read -p "Continue anyway? (y/n): " -n 1 -r
         echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            exit 1
-        fi
+        [[ $REPLY =~ ^[Yy]$ ]] || exit 1
     fi
 }
 
-# Create backup of existing config files
 backup_config() {
     local file="$1"
     if [[ -e "$file" ]]; then
         local backup_dir="$HOME/.pop-setup-backups/$(date +%Y%m%d_%H%M%S)"
         mkdir -p "$backup_dir"
-        local basename=$(basename "$file")
-        cp -r "$file" "$backup_dir/$basename.bak"
-        log_info "Backed up: $file -> $backup_dir/$basename.bak"
+        cp -r "$file" "$backup_dir/$(basename "$file").bak"
+        log_info "Backed up: $file"
     fi
 }
 
-# Add a line to shell config if not present
-add_to_shell_config() {
-    local line="$1"
-    local shell_config="$HOME/.bashrc"
-    if ! grep -qF "$line" "$shell_config" 2>/dev/null; then
-        echo "$line" >> "$shell_config"
-        log_info "Added to .bashrc: $line"
-    fi
-}
-
-#
-# System Update
-#
+# ============================================================
+# 1. System Updates
+# ============================================================
 update_system() {
     log_info "Updating system packages..."
     sudo apt update
     sudo apt upgrade -y
+    sudo apt autoremove -y
     log_success "System updated"
 }
 
-#
-# Install Pop OS specific tools
-#
-install_pop_tools() {
-    log_info "Installing Pop OS specific tools..."
+# ============================================================
+# 2. Install Chrome (the only app users need)
+# ============================================================
+install_chrome() {
+    log_info "Installing Google Chrome..."
 
-    # system76-power is pre-installed on Pop OS, but ensure it's available
-    if command -v system76-power &> /dev/null; then
-        log_success "system76-power available"
-    else
-        log_warn "system76-power not found - may need to install system76-power"
-    fi
-
-    # Install kernel scheduler utilities
-    sudo apt install -y preload
-    log_success "Preload installed"
-}
-
-#
-# Configure Power Management
-#
-configure_power() {
-    log_info "Configuring power management..."
-
-    # Set default power profile to battery for laptops
-    if command -v system76-power &> /dev/null; then
-        sudo system76-power profile battery
-        log_info "Default power profile set to battery mode"
-
-        # Enable battery-bt (battery threshold) if available
-        if sudo system76-power profile-battery-threshold --help &> /dev/null 2>&1; then
-            sudo system76-power profile-battery-threshold 80
-            log_info "Battery charge threshold set to 80%"
-        fi
-    fi
-
-    # Configure TLP for additional power management (if not using system76-power exclusively)
-    if ! command -v tlp &> /dev/null; then
-        log_info "Installing TLP for advanced power management..."
-        sudo apt install -y tlp tlp-rdw
-        sudo tlp start
-    fi
-
-    log_success "Power management configured"
-}
-
-#
-# Configure CPU Governor
-#
-configure_cpu() {
-    log_info "Configuring CPU governor..."
-
-    # Set powersave as default for better battery life
-    if [[ -d /sys/devices/system/cpu/cpu0/cpufreq ]]; then
-        echo "powersave" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
-        log_info "CPU governor set to powersave"
-    else
-        log_warn "CPU frequency scaling not available"
-    fi
-
-    log_success "CPU governor configured"
-}
-
-#
-# Configure GPU (for hybrid graphics systems)
-#
-configure_gpu() {
-    log_info "Configuring GPU settings..."
-
-    if command -v system76-power &> /dev/null; then
-        # Detect if hybrid graphics is available
-        if system76-power graphics --help &> /dev/null 2>&1; then
-            current_gpu=$(system76-power graphics 2>/dev/null || echo "unknown")
-            log_info "Current GPU mode: $current_gpu"
-
-            # Default to integrated for battery life (user can change)
-            log_info "Setting GPU to integrated mode (run 'system76-power graphics switch' to change)"
-        fi
-    fi
-
-    # Install GPU utilities if needed
-    if ! command -v glxinfo &> /dev/null; then
-        sudo apt install -y mesa-utils
-    fi
-
-    log_success "GPU configuration complete"
-}
-
-#
-# Install Desktop Applications
-#
-install_desktop_apps() {
-    log_info "Installing desktop applications..."
-
-    # Web Browser - Install Chrome and set as default
     CHROME_SOURCE="/etc/apt/sources.list.d/chrome.list"
 
-    # Fix existing Chrome repo with conflicting Signed-By value
+    # Fix conflicting Signed-By if present
     if [[ -f "$CHROME_SOURCE" ]]; then
         if grep -q "Signed-By" "$CHROME_SOURCE" && ! grep -q "signed-by=/usr/share/keyrings/chrome.gpg" "$CHROME_SOURCE" 2>/dev/null; then
-            log_info "Fixing Chrome repository Signed-By conflict..."
             sudo rm -f "$CHROME_SOURCE"
         fi
     fi
 
     if ! command -v google-chrome &> /dev/null; then
-        log_info "Adding Chrome repository..."
         wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/chrome.gpg 2>/dev/null || true
         echo "deb [arch=amd64 signed-by=/usr/share/keyrings/chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee "$CHROME_SOURCE"
         sudo apt update
@@ -205,292 +107,396 @@ install_desktop_apps() {
     fi
 
     # Set Chrome as default browser
-    if command -v google-chrome &> /dev/null; then
-        # Set via xdg-settings (works across desktop environments)
-        xdg-settings set default-web-browser google-chrome.desktop 2>/dev/null || true
+    xdg-settings set default-web-browser google-chrome.desktop 2>/dev/null || true
+    xdg-mime default google-chrome.desktop x-scheme-handler/http 2>/dev/null || true
+    xdg-mime default google-chrome.desktop x-scheme-handler/https 2>/dev/null || true
 
-        # Also set via gsettings for GNOME-based environments (Pop OS uses COSMIC/GNOME)
-        gsettings set org.gnome.shell favored-apps '[' 'google-chrome.desktop' ']' 2>/dev/null || true
+    log_success "Chrome set as default browser"
+}
 
-        # Set Chrome as handler for http/https schemes
-        xdg-mime set google-chrome.desktop x-scheme-handler/http 2>/dev/null || true
-        xdg-mime set google-chrome.desktop x-scheme-handler/https 2>/dev/null || true
+# ============================================================
+# 3. Configure Power Management
+# ============================================================
+configure_power() {
+    log_info "Configuring power management..."
 
-        log_success "Google Chrome set as default browser"
+    if command -v system76-power &> /dev/null; then
+        sudo system76-power profile battery
+        log_info "Power profile set to battery"
     fi
 
-    # Install Chrome extension support for Microsoft SSO
-    log_info "Microsoft SSO extension info..."
-    # The Microsoft Single Sign-On extension must be installed manually from Chrome Web Store
-    # Extension ID: ppnbnpeolgpkdlgjckdndopbflcpplknm
-    mkdir -p "$HOME/.pop-setup-backups"
-    cat > "$HOME/.pop-setup-backups/chrome-sso-extension.txt" << 'EXTENSION_INFO'
-After first Chrome launch, install the Microsoft Single Sign-On extension:
-
-Chrome Web Store:
-  https://chromewebstore.google.com/detail/microsoft-single-sign-on/ppnbnpeolgpkdlgjckdndopbflcpplknm
-
-This extension enables SSO for Microsoft 365 / Azure AD / Entra ID.
-EXTENSION_INFO
-    log_success "SSO extension info saved to ~/.pop-setup-backups/chrome-sso-extension.txt"
-
-    # Communication Apps
-    sudo apt install -y discord slack
-
-    # Productivity Tools
-    sudo apt install -y \
-        libreoffice \
-        evince \
-        gnome-calculator \
-        gnome-calendar
-
-    # Font installation
-    sudo apt install -y \
-        fonts-firacode \
-        fonts-jetbrains-mono \
-        fonts-noto \
-        fonts-ubuntu
-
-    log_success "Desktop applications installed"
-}
-
-#
-# Setup Development Basics (optional but recommended)
-#
-install_dev_basics() {
-    log_info "Installing basic development tools..."
-
-    sudo apt install -y \
-        git \
-        curl \
-        wget \
-        jq \
-        ripgrep \
-        fzf \
-        neovim \
-        tmux \
-        zsh \
-        build-essential \
-        libssl-dev \
-        pkg-config \
-        libdbus-1-dev \
-        libglib2.0-dev
-
-    log_success "Development basics installed"
-}
-
-#
-# Configure Shell and Prompt
-#
-configure_shell() {
-    log_info "Configuring shell..."
-
-    # Set zsh as default shell
-    if [[ ! $SHELL =~ zsh ]]; then
-        chsh -s $(which zsh)
-        log_info "Default shell changed to zsh"
+    if ! command -v tlp &> /dev/null; then
+        sudo apt install -y tlp tlp-rdw
+        sudo tlp start
     fi
 
-    # Install oh-my-zsh if not present
-    if [[ ! -d "$HOME/.oh-my-zsh" ]]; then
-        log_info "Installing oh-my-zsh..."
-        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-    fi
-
-    log_success "Shell configured"
+    log_success "Power management configured"
 }
 
-#
-# Backup and Apply Configs
-#
-setup_configs() {
-    log_info "Setting up configurations..."
-
-    # Create config directory
-    mkdir -p "$HOME/.config"
-
-    # Backup existing configs
-    backup_config "$HOME/.bashrc"
-    backup_config "$HOME/.zshrc"
-    backup_config "$HOME/.tmux.conf"
-    backup_config "$HOME/.config/nvim"
-
-    # Create basic .bashrc additions
-    add_to_shell_config "# Pop OS Setup"
-    add_to_shell_config "export EDITOR='nvim'"
-    add_to_shell_config "export VISUAL='nvim'"
-    add_to_shell_config "alias ll='ls -la'"
-    add_to_shell_config "alias gs='git status'"
-    add_to_shell_config "alias gp='git pull'"
-    add_to_shell_config "alias gc='git commit'"
-
-    # Source bashrc to apply changes
-    source "$HOME/.bashrc" 2>/dev/null || true
-
-    log_success "Configurations applied"
-}
-
-#
-# Configure Auto-login and Chrome SSO Auto-launch
-#
+# ============================================================
+# 4. Configure Auto-login
+# ============================================================
 configure_autologin() {
     log_info "Configuring auto-login..."
 
-    # Get current username
     local username="$USER"
+    local gdm_conf="/etc/gdm3/custom.conf"
 
-    # Pop OS uses GDM (GNOME Display Manager)
-    local gdm_custom_conf="/etc/gdm3/custom.conf"
+    backup_config "$gdm_conf"
 
-    # Backup existing GDM config
-    backup_config "$gdm_custom_conf"
+    if [[ -f "$gdm_conf" ]]; then
+        sudo sed -i '/^AutomaticLogin/d' "$gdm_conf"
+        sudo sed -i '/^AutomaticLoginEnable/d' "$gdm_conf"
 
-    # Enable auto-login in GDM
-    if [[ -f "$gdm_custom_conf" ]]; then
-        # Remove any existing AutomaticLogin line
-        sudo sed -i '/^AutomaticLogin/d' "$gdm_custom_conf"
-        # Add auto-login for current user
-        echo "AutomaticLogin = $username" | sudo tee -a "$gdm_custom_conf"
-        log_success "Auto-login enabled for user: $username"
+        if grep -q '^\[daemon\]' "$gdm_conf"; then
+            sudo sed -i '/^\[daemon\]/a AutomaticLoginEnable = true\nAutomaticLogin = '"$username" "$gdm_conf"
+        else
+            printf '\n[daemon]\nAutomaticLoginEnable = true\nAutomaticLogin = %s\n' "$username" | sudo tee -a "$gdm_conf" > /dev/null
+        fi
+        log_success "Auto-login enabled for: $username"
     else
-        log_warn "GDM config not found at $gdm_custom_conf"
+        log_warn "GDM config not found at $gdm_conf"
     fi
-
-    # Configure Chrome to auto-launch with Microsoft SSO page on login
-    log_info "Configuring Chrome auto-launch on login..."
-
-    # Create systemd user directory if not exists
-    mkdir -p "$HOME/.config/systemd/user"
-
-    # Create a service file to launch Chrome on login
-    cat > "$HOME/.config/systemd/user/chrome-sso.service" << EOF
-[Unit]
-Description=Launch Chrome to Microsoft SSO
-After=graphical-session.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/google-chrome-stable --no-first-run --no-default-browser-check https://login.microsoftonline.com
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-EOF
-
-    # Enable the service
-    systemctl --user daemon-reload
-    systemctl --user enable chrome-sso.service 2>/dev/null || log_warn "Could not enable chrome-sso service (may require reboot)"
-
-    # Also add to GNOME autostart for compatibility
-    mkdir -p "$HOME/.config/autostart"
-    cat > "$HOME/.config/autostart/chrome-sso.desktop" << EOF
-[Desktop Entry]
-Type=Application
-Name=Chrome Microsoft SSO
-Exec=/usr/bin/google-chrome-stable --no-first-run --no-default-browser-check https://login.microsoftonline.com
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-EOF
-
-    log_success "Auto-login and Chrome SSO auto-launch configured"
-    log_warn "Auto-login means anyone with physical access can log in. Ensure disk encryption is enabled."
 }
 
-#
-# Configure Dock Icons with Website Shortcuts
-#
-configure_dock_icons() {
-    log_info "Configuring dock icons with website shortcuts..."
+# ============================================================
+# 5. Install Icons & Assets
+# ============================================================
+install_assets() {
+    log_info "Installing icons and assets..."
 
-    # Create directory for custom applications
-    mkdir -p "$HOME/.local/share/applications"
+    sudo mkdir -p "$ICON_DIR" "$WALLPAPER_DIR"
 
-    # Define websites to pin to dock
-    declare -A websites=(
-        ["microsoft-365"]="https://www.office.com"
-        ["outlook"]="https://outlook.office.com"
-        ["teams"]="https://teams.microsoft.com"
-        ["sharepoint"]="https://login.microsoftonline.com"
-        ["lamplight"]="https://lamplight.online"
-        ["easyyouthclub"]="https://4youth.org.uk"
+    # Icon files in the repo -> local icon names
+    declare -A icon_files=(
+        ["Chrome.png"]="chrome.png"
+        ["lamplight.png"]="lamplight.png"
+        ["4youth.png"]="4youth.png"
+        ["office365.png"]="office365.png"
+        ["Outlook.png"]="outlook.png"
     )
 
-    # Create Chrome app shortcuts for each website
-    for name in "${!websites[@]}"; do
-        url="${websites[$name]}"
-        local app_name="Chrome ${name}"
-        local desktop_file="$HOME/.local/share/applications/chrome-${name}.desktop"
+    for remote_name in "${!icon_files[@]}"; do
+        local local_name="${icon_files[$remote_name]}"
+        local dest="$ICON_DIR/$local_name"
+        if [[ ! -f "$dest" ]]; then
+            curl -sL "${ASSETS_URL}/${remote_name}" -o "/tmp/${local_name}"
+            if [[ -s "/tmp/${local_name}" ]]; then
+                sudo mv "/tmp/${local_name}" "$dest"
+                log_info "Installed icon: $local_name"
+            else
+                rm -f "/tmp/${local_name}"
+                log_warn "Failed to download icon: $remote_name"
+            fi
+        fi
+    done
 
-        # Create Chrome app mode shortcut (opens in its own window without browser UI)
+    # Optional wallpaper
+    if [[ ! -f "$WALLPAPER_DIR/wallpaper.png" ]]; then
+        curl -sL "${ASSETS_URL}/wallpaper.png" -o "/tmp/wallpaper.png"
+        if [[ -s "/tmp/wallpaper.png" ]]; then
+            sudo mv "/tmp/wallpaper.png" "$WALLPAPER_DIR/wallpaper.png"
+            log_info "Installed wallpaper"
+        else
+            rm -f "/tmp/wallpaper.png"
+            log_info "No wallpaper image found — will use solid brand colour"
+        fi
+    fi
+
+    log_success "Assets installed"
+}
+
+# ============================================================
+# 6. Create Desktop Shortcuts (the 5 icons)
+# ============================================================
+create_desktop_shortcuts() {
+    log_info "Creating desktop shortcuts..."
+
+    local apps_dir="$HOME/.local/share/applications"
+    mkdir -p "$apps_dir"
+
+    # Define the 5 shortcuts and their icons
+    declare -A shortcuts=(
+        ["Chrome"]="google-chrome"
+        ["Lamplight"]="https://lamplight.online"
+        ["4Youth Website"]="https://4youth.org.uk"
+        ["Microsoft Office 365"]="https://portal.office365.com"
+        ["Microsoft Outlook"]="https://outlook.office365.com"
+    )
+
+    declare -A icons=(
+        ["Chrome"]="$ICON_DIR/chrome.png"
+        ["Lamplight"]="$ICON_DIR/lamplight.png"
+        ["4Youth Website"]="$ICON_DIR/4youth.png"
+        ["Microsoft Office 365"]="$ICON_DIR/office365.png"
+        ["Microsoft Outlook"]="$ICON_DIR/outlook.png"
+    )
+
+    # Desktop file IDs for dock pinning (in order)
+    local dock_ids=()
+
+    for name in "Chrome" "Lamplight" "4Youth Website" "Microsoft Office 365" "Microsoft Outlook"; do
+        local target="${shortcuts[$name]}"
+        local icon="${icons[$name]}"
+
+        # Fall back to generic Chrome icon if custom icon is missing
+        [[ -f "$icon" ]] || icon="google-chrome"
+
+        if [[ "$name" == "Chrome" ]]; then
+            # Create a custom Chrome .desktop so it uses our icon
+            local chrome_desktop="$apps_dir/4youth-chrome.desktop"
+            cat > "$chrome_desktop" << EOF
+[Desktop Entry]
+Version=1.0
+Name=Chrome
+Comment=Open Google Chrome
+Exec=/usr/bin/google-chrome-stable --no-first-run --no-default-browser-check %U
+Icon=${icon}
+Terminal=false
+Type=Application
+Categories=Network;
+MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+StartupWMClass=google-chrome
+EOF
+            dock_ids+=("4youth-chrome.desktop")
+            log_info "Created shortcut: Chrome (custom icon)"
+            continue
+        fi
+
+        # Create a Chrome --app shortcut for each website
+        local safe_name
+        safe_name=$(echo "$name" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')
+        local desktop_file="$apps_dir/4youth-${safe_name}.desktop"
+        local desktop_id="4youth-${safe_name}.desktop"
+
         cat > "$desktop_file" << EOF
 [Desktop Entry]
 Version=1.0
-Name=${app_name}
-Comment=Open ${name} in Chrome
-Exec=/usr/bin/google-chrome-stable --app=${url} --no-first-run --no-default-browser-check
-Icon=google-chrome
+Name=${name}
+Comment=Open ${name}
+Exec=/usr/bin/google-chrome-stable --app=${target} --no-first-run --no-default-browser-check
+Icon=${icon}
 Terminal=false
 Type=Application
-Categories=Network;Application;
-StartupWMClass=chrome-${name}
+Categories=Network;
+StartupWMClass=chrome-${safe_name}
 EOF
 
-        log_info "Created shortcut: ${app_name} -> ${url}"
+        dock_ids+=("$desktop_id")
+        log_info "Created shortcut: ${name} -> ${target}"
     done
 
-    # Pin the shortcuts to the dock (favorites)
-    # Get current favorites
-    current_favorites=$(gsettings get org.gnome.shell favorite-apps 2>/dev/null || echo "[]")
+    # Pin exactly these 5 items to the dock (nothing else)
+    local favorites_str
+    favorites_str=$(printf "'%s', " "${dock_ids[@]}")
+    favorites_str="[${favorites_str%, }]"
 
-    # Build new favorites list with our Chrome shortcuts
-    # Note: We need to include the .desktop filenames without path
-    new_favorites=('chrome-microsoft-365.desktop' 'chrome-outlook.desktop' 'chrome-teams.desktop' 'chrome-sharepoint.desktop')
+    gsettings set org.gnome.shell favorite-apps "$favorites_str" 2>/dev/null || \
+        log_warn "Could not set dock favorites"
 
-    # Add some default apps if they exist
-    [[ -f /usr/share/applications/org.gnome.Nautilus.desktop ]] && new_favorites+=('org.gnome.Nautilus.desktop')
-    [[ -f /usr/share/applications/org.gnome.Terminal.desktop ]] && new_favorites+=('org.gnome.Terminal.desktop')
-
-    # Set the favorites
-    gsettings set org.gnome.shell favorite-apps "$(printf '%s\n' "${new_favorites[@]}" | jq -R . | jq -s .)" 2>/dev/null || \
-        log_warn "Could not set dock favorites (GNOME settings may not be available)"
-
-    log_success "Dock icons configured with website shortcuts"
+    log_success "Desktop shortcuts created and pinned to dock"
 }
 
-#
-# Check for Script Updates from GitHub
-#
+# ============================================================
+# 7. Lock Down the Desktop
+# ============================================================
+lockdown_desktop() {
+    log_info "Locking down desktop environment..."
+
+    # --- Hide all applications the user should not access ---
+
+    local apps_dir="$HOME/.local/share/applications"
+    mkdir -p "$apps_dir"
+
+    # List of system .desktop files to hide from the user
+    local hide_apps=(
+        # Terminals
+        "org.gnome.Terminal.desktop"
+        "io.elementary.terminal.desktop"
+        "com.system76.CosmicTerm.desktop"
+        # File managers
+        "org.gnome.Nautilus.desktop"
+        "io.elementary.files.desktop"
+        "com.system76.CosmicFiles.desktop"
+        # Settings
+        "gnome-control-center.desktop"
+        "org.gnome.Settings.desktop"
+        "com.system76.CosmicSettings.desktop"
+        "io.elementary.switchboard.desktop"
+        # System tools
+        "org.gnome.DiskUtility.desktop"
+        "org.gnome.SystemMonitor.desktop"
+        "gnome-system-monitor.desktop"
+        "org.gnome.baobab.desktop"
+        "org.gnome.Logs.desktop"
+        "org.gnome.font-viewer.desktop"
+        "org.gnome.Characters.desktop"
+        "yelp.desktop"
+        # Text editors
+        "org.gnome.TextEditor.desktop"
+        "org.gnome.gedit.desktop"
+        "gedit.desktop"
+        # Software center
+        "io.elementary.appcenter.desktop"
+        "org.gnome.Software.desktop"
+        "pop-cosmic-applications.desktop"
+        "repoman.desktop"
+        # Other pre-installed apps
+        "org.gnome.Calculator.desktop"
+        "org.gnome.Calendar.desktop"
+        "org.gnome.clocks.desktop"
+        "org.gnome.Contacts.desktop"
+        "org.gnome.Evince.desktop"
+        "org.gnome.eog.desktop"
+        "org.gnome.Totem.desktop"
+        "org.gnome.Cheese.desktop"
+        "org.gnome.Screenshot.desktop"
+        "org.gnome.Weather.desktop"
+        "org.gnome.Maps.desktop"
+        "libreoffice-startcenter.desktop"
+        "libreoffice-writer.desktop"
+        "libreoffice-calc.desktop"
+        "libreoffice-impress.desktop"
+        "libreoffice-draw.desktop"
+        "libreoffice-base.desktop"
+        "libreoffice-math.desktop"
+        "firefox.desktop"
+        "firefox-esr.desktop"
+        "com.system76.Popsicle.desktop"
+        "firmware-manager.desktop"
+    )
+
+    for app in "${hide_apps[@]}"; do
+        local override_file="$apps_dir/$app"
+        # Create a local override that hides the app from menus/search
+        if [[ ! -f "$override_file" ]] || ! grep -q "NoDisplay=true" "$override_file" 2>/dev/null; then
+            cat > "$override_file" << EOF
+[Desktop Entry]
+NoDisplay=true
+Hidden=true
+EOF
+            log_info "Hidden: $app"
+        fi
+    done
+
+    # --- Disable keyboard shortcuts that could bypass lockdown ---
+
+    # Disable terminal shortcut (Ctrl+Alt+T is not set by default in GNOME
+    # but some Pop!_OS configs add it via custom keybindings)
+    local custom_keys="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings"
+    gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "[]" 2>/dev/null || true
+
+    # Disable overview/activities (Super key) — prevents app search
+    gsettings set org.gnome.mutter overlay-key '' 2>/dev/null || true
+
+    # Disable switch-applications shortcut that shows app list
+    gsettings set org.gnome.shell.keybindings toggle-application-view "[]" 2>/dev/null || true
+
+    # Disable ability to open the run dialog
+    gsettings set org.gnome.desktop.wm.keybindings panel-run-dialog "[]" 2>/dev/null || true
+
+    # Disable lock screen (they auto-login anyway, lock screen just confuses)
+    gsettings set org.gnome.desktop.lockdown disable-lock-screen true 2>/dev/null || true
+
+    # Disable user switching
+    gsettings set org.gnome.desktop.lockdown disable-user-switching true 2>/dev/null || true
+
+    # Disable log out from the UI (admin can still reboot/shutdown via power button)
+    gsettings set org.gnome.desktop.lockdown disable-log-out true 2>/dev/null || true
+
+    # Disable print (optional — remove if printing is needed)
+    gsettings set org.gnome.desktop.lockdown disable-printing false 2>/dev/null || true
+
+    # --- Hide the dock "Show Applications" button ---
+    gsettings set org.gnome.shell.extensions.dash-to-dock show-show-apps-button false 2>/dev/null || true
+
+    # --- Disable right-click on desktop ---
+    gsettings set org.gnome.desktop.background show-desktop-icons false 2>/dev/null || true
+
+    # --- Prevent access to GNOME Settings via dbus ---
+    # Block the user from launching gnome-control-center even if they find a way
+    local polkit_dir="/etc/polkit-1/localauthority/50-local.d"
+    if [[ -d /etc/polkit-1 ]]; then
+        sudo mkdir -p "$polkit_dir"
+        sudo tee "$polkit_dir/50-restrict-settings.pkla" > /dev/null << 'EOF'
+[Restrict System Settings]
+Identity=unix-user:*
+Action=org.gnome.controlcenter.*
+ResultAny=no
+ResultInactive=no
+ResultActive=auth_admin
+EOF
+        log_info "Polkit: system settings require admin password"
+    fi
+
+    log_success "Desktop locked down"
+}
+
+# ============================================================
+# 8. Disable Unnecessary Services
+# ============================================================
+disable_unnecessary_services() {
+    log_info "Disabling unnecessary services..."
+
+    # Disable Bluetooth if not needed
+    sudo systemctl disable bluetooth.service 2>/dev/null || true
+    sudo systemctl stop bluetooth.service 2>/dev/null || true
+
+    log_success "Unnecessary services disabled"
+}
+
+# ============================================================
+# 9. Set Wallpaper (clean branded desktop)
+# ============================================================
+set_wallpaper() {
+    log_info "Setting desktop wallpaper..."
+
+    if [[ -f "$WALLPAPER_DIR/wallpaper.png" ]]; then
+        # Use custom wallpaper image
+        gsettings set org.gnome.desktop.background picture-uri "file://$WALLPAPER_DIR/wallpaper.png" 2>/dev/null || true
+        gsettings set org.gnome.desktop.background picture-uri-dark "file://$WALLPAPER_DIR/wallpaper.png" 2>/dev/null || true
+        gsettings set org.gnome.desktop.background picture-options 'zoom' 2>/dev/null || true
+        log_success "Wallpaper set (custom image)"
+    else
+        # Fall back to solid 4Youth brand colour
+        gsettings set org.gnome.desktop.background picture-options 'none' 2>/dev/null || true
+        gsettings set org.gnome.desktop.background primary-color "$BRAND_COLOUR" 2>/dev/null || true
+        gsettings set org.gnome.desktop.background color-shading-type 'solid' 2>/dev/null || true
+        log_success "Wallpaper set (4Youth brand colour)"
+    fi
+}
+
+# ============================================================
+# Update System (check, prompt, apply)
+# ============================================================
 check_for_updates() {
-    log_info "Checking for script updates from GitHub..."
+    log_info "Checking for script updates..."
 
-    # Get hash of current local script (excluding the config lines at top)
-    local_hash=$(tail -n +20 "$HOME/pop-setup.sh" 2>/dev/null | md5sum | cut -d' ' -f1)
+    local local_hash remote_content remote_hash
+    local_hash=$(md5sum "$HOME/pop-setup.sh" 2>/dev/null | cut -d' ' -f1)
 
-    # Get hash of remote script
     remote_content=$(curl -sL "$SCRIPT_URL" 2>/dev/null || echo "")
     if [[ -z "$remote_content" ]]; then
         log_warn "Could not fetch remote script (network issue?)"
         return 1
     fi
-    remote_hash=$(echo "$remote_content" | tail -n +20 | md5sum | cut -d' ' -f1)
+    remote_hash=$(echo "$remote_content" | md5sum | cut -d' ' -f1)
 
     if [[ "$local_hash" != "$remote_hash" ]]; then
+        if [[ -f "$SKIP_FILE" ]] && [[ "$(cat "$SKIP_FILE")" == "$remote_hash" ]]; then
+            log_info "Update available but this version was skipped"
+            return 1
+        fi
         log_warn "Update available!"
-        echo ""
-        echo "  Local version hash:  $local_hash"
-        echo "  Remote version hash: $remote_hash"
-        echo ""
-        return 0  # Update available
+        echo "  Local:  $local_hash"
+        echo "  Remote: $remote_hash"
+        return 0
     else
         log_success "Script is up to date"
-        return 1  # No update needed
+        return 1
     fi
 }
 
-#
-# Get current delay count
-#
 get_delay_count() {
     if [[ -f "$DELAY_FILE" ]]; then
         cat "$DELAY_FILE"
@@ -499,204 +505,181 @@ get_delay_count() {
     fi
 }
 
-#
-# Increment delay count
-#
 increment_delay() {
-    local current=$(get_delay_count)
-    local new=$((current + 1))
+    local current new
+    current=$(get_delay_count)
+    new=$((current + 1))
     echo "$new" > "$DELAY_FILE"
     echo "$new"
 }
 
-#
-# Reset delay count (after update is applied)
-#
 reset_delay() {
     rm -f "$DELAY_FILE"
+    rm -f "$SKIP_FILE"
 }
 
-#
-# Prompt user to update or delay
-#
 prompt_update() {
     local delays_remaining=$((MAX_DELAYS - $(get_delay_count)))
 
     echo ""
     log_warn "A new version of pop-setup.sh is available!"
-    echo ""
-    echo "  You have delayed $((MAX_DELAYS - delays_remaining)) time(s) already."
-    echo "  Delays remaining: $delays_remaining"
+    echo "  Delays used: $((MAX_DELAYS - delays_remaining)) / $MAX_DELAYS"
     echo ""
 
     if [[ $delays_remaining -le 0 ]]; then
-        log_error "Maximum delays ($MAX_DELAYS) reached. Update will be applied now."
+        log_error "Maximum delays reached. Updating now."
         apply_update
         return
     fi
 
-    echo "Options:"
     echo "  [1] Update now (recommended)"
-    echo "  [2] Delay update (reminds you next login, $delays_remaining left)"
-    echo "  [3] Skip this version (won't remind again)"
+    echo "  [2] Delay ($delays_remaining remaining)"
+    echo "  [3] Skip this version"
     echo ""
-
-    read -p "Choose option [1-3]: " -n 1 -r
+    read -p "Choose [1-3]: " -n 1 -r
     echo ""
 
     case $REPLY in
-        1)
-            apply_update
-            ;;
+        1) apply_update ;;
         2)
             increment_delay > /dev/null
-            log_info "Update delayed. You have $((delays_remaining - 1)) delay(s) remaining."
+            log_info "Update delayed. $((delays_remaining - 1)) delay(s) remaining."
             ;;
         3)
-            # Mark this version as skipped
-            echo "$(get_delay_count)" > "$DELAY_FILE"
-            echo "skipped:$(date +%Y%m%d_%H%M%S)" >> "$DELAY_FILE"
-            log_info "Update skipped. Will check again on next version."
+            local remote_content
+            remote_content=$(curl -sL "$SCRIPT_URL" 2>/dev/null || echo "")
+            if [[ -n "$remote_content" ]]; then
+                echo "$remote_content" | md5sum | cut -d' ' -f1 > "$SKIP_FILE"
+            fi
+            reset_delay
+            log_info "Version skipped."
             ;;
-        *)
-            log_info "No action taken."
-            ;;
+        *) log_info "No action taken." ;;
     esac
 }
 
-#
-# Apply update from GitHub
-#
 apply_update() {
-    log_info "Downloading update from GitHub..."
+    log_info "Downloading update..."
 
-    # Backup current script
     backup_config "$HOME/pop-setup.sh"
-
-    # Download new version
     curl -sL "$SCRIPT_URL" -o "$HOME/pop-setup.sh.tmp"
 
-    # Verify download succeeded
     if [[ ! -s "$HOME/pop-setup.sh.tmp" ]]; then
         log_error "Download failed!"
         rm -f "$HOME/pop-setup.sh.tmp"
         return 1
     fi
 
-    # Make executable and replace
     chmod +x "$HOME/pop-setup.sh.tmp"
     mv "$HOME/pop-setup.sh.tmp" "$HOME/pop-setup.sh"
-
-    # Reset delay counter
     reset_delay
 
-    log_success "Script updated successfully!"
-
-    # Re-execute the new script
+    log_success "Script updated!"
     log_info "Running updated script..."
-    exec "$HOME/pop-setup.sh" "$@"
+    exec "$HOME/pop-setup.sh"
 }
 
-#
-# Setup Login Check Service (runs on every login)
-#
 setup_login_check() {
-    log_info "Setting up update check on login..."
+    log_info "Setting up login update check..."
 
-    # Create systemd user directory
     mkdir -p "$HOME/.config/systemd/user"
 
-    # Create the login check script
-    cat > "$HOME/.config/systemd/user/pop-setup-check.sh" << CHECKSCRIPT
-#!/usr/bin/env bash
-# Pop Setup Login Update Check
-
-DELAY_FILE="$HOME/.pop-setup-delay-count"
-SCRIPT_PATH="$HOME/pop-setup.sh"
-SCRIPT_URL="$SCRIPT_URL"
-
-# Check if script exists
-if [[ ! -f "$SCRIPT_PATH" ]]; then
-    exit 0
-fi
-
-# Source the script to get functions
-source "$SCRIPT_PATH" 2>/dev/null || exit 0
-
-# Check for updates
-if check_for_updates 2>/dev/null; then
-    # Update available, prompt user
-    prompt_update
-fi
-CHECKSCRIPT
-
-    chmod +x "$HOME/.config/systemd/user/pop-setup-check.sh"
-
-    # Create systemd service
     cat > "$HOME/.config/systemd/user/pop-setup-check.service" << EOF
 [Unit]
 Description=Check for pop-setup.sh updates on login
 After=graphical-session.target
+ConditionPathExists=$HOME/pop-setup.sh
 
 [Service]
 Type=oneshot
-ExecStart=$HOME/.config/systemd/user/pop-setup-check.sh
+ExecStart=$HOME/pop-setup.sh --check-update
 RemainAfterExit=no
 
 [Install]
 WantedBy=default.target
 EOF
 
-    # Enable the service
     systemctl --user daemon-reload
     systemctl --user enable pop-setup-check.service 2>/dev/null || \
-        log_warn "Could not enable login check service (may require reboot)"
+        log_warn "Could not enable login check service"
 
     log_success "Login update check configured"
 }
 
-#
-# Show usage
-#
+# ============================================================
+# Usage
+# ============================================================
 usage() {
     cat << EOF
-Pop OS Setup Script - Reproducible laptop setup
+4Youth Pop!_OS Kiosk Setup Script
 
 Usage: $0 [OPTIONS]
 
 Options:
   --check-update    Check for updates and prompt to install
   --apply-update    Download and apply update immediately
-  --setup-login     Set up update check on login (run once)
+  --setup-login     Set up update check on login
   --reset-delay     Reset the delay counter
-  --force           Run full setup without prompts
+  --unlock          Remove lockdown (restore access to apps/settings)
   -h, --help        Show this help message
 
-Without options, runs the full setup interactively.
+Without options, runs the full kiosk setup.
 EOF
 }
 
-#
-# Main Execution
-#
+# ============================================================
+# Unlock (for admin maintenance)
+# ============================================================
+unlock_desktop() {
+    log_info "Removing desktop lockdown..."
+
+    local apps_dir="$HOME/.local/share/applications"
+
+    # Remove all our override .desktop files that hide apps
+    for f in "$apps_dir"/*.desktop; do
+        [[ -f "$f" ]] || continue
+        # Only remove files we created (they contain NoDisplay=true and Hidden=true, nothing else)
+        if grep -q "NoDisplay=true" "$f" 2>/dev/null && [[ $(wc -l < "$f") -le 4 ]]; then
+            rm -f "$f"
+            log_info "Restored: $(basename "$f")"
+        fi
+    done
+
+    # Re-enable keyboard shortcuts
+    gsettings reset org.gnome.mutter overlay-key 2>/dev/null || true
+    gsettings reset org.gnome.shell.keybindings toggle-application-view 2>/dev/null || true
+    gsettings reset org.gnome.desktop.wm.keybindings panel-run-dialog 2>/dev/null || true
+    gsettings reset org.gnome.desktop.lockdown disable-lock-screen 2>/dev/null || true
+    gsettings reset org.gnome.desktop.lockdown disable-user-switching 2>/dev/null || true
+    gsettings reset org.gnome.desktop.lockdown disable-log-out 2>/dev/null || true
+
+    # Re-enable show-apps button
+    gsettings reset org.gnome.shell.extensions.dash-to-dock show-show-apps-button 2>/dev/null || true
+
+    # Remove polkit restriction
+    sudo rm -f /etc/polkit-1/localauthority/50-local.d/50-restrict-settings.pkla 2>/dev/null || true
+
+    log_success "Desktop unlocked. Log out and back in for full effect."
+}
+
+# ============================================================
+# Main
+# ============================================================
 main() {
-    # Parse command line arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
             --check-update)
-                check_root
-                if check_for_updates; then
-                    prompt_update
-                fi
+                check_not_root
+                check_for_updates && prompt_update
                 exit 0
                 ;;
             --apply-update)
-                check_root
+                check_not_root
                 apply_update
                 exit $?
                 ;;
             --setup-login)
-                check_root
+                check_not_root
                 setup_login_check
                 exit 0
                 ;;
@@ -705,9 +688,10 @@ main() {
                 log_success "Delay counter reset"
                 exit 0
                 ;;
-            --force)
-                SKIP_PROMPTS=true
-                shift
+            --unlock)
+                check_not_root
+                unlock_desktop
+                exit 0
                 ;;
             -h|--help)
                 usage
@@ -722,39 +706,42 @@ main() {
     done
 
     echo "========================================"
-    echo "  Pop OS Setup Script"
+    echo "  4Youth Pop!_OS Kiosk Setup"
     echo "  $(date)"
     echo "========================================"
     echo
 
-    check_root
+    check_not_root
     check_pop_os
 
-    log_info "Starting setup..."
+    log_info "Starting kiosk setup..."
     echo
 
     update_system
-    install_pop_tools
+    install_chrome
     configure_power
-    configure_cpu
-    configure_gpu
-    install_desktop_apps
-    install_dev_basics
-    configure_shell
-    setup_configs
     configure_autologin
-    configure_dock_icons
+    install_assets
+    create_desktop_shortcuts
+    lockdown_desktop
+    disable_unnecessary_services
+    set_wallpaper
     setup_login_check
-    cleanup
 
     echo
-    log_success "Setup complete!"
+    log_success "Kiosk setup complete!"
     echo
-    echo "Please reboot for all changes to take effect."
-    echo "Some configs may require logging out and back in."
+    echo "The laptop will now:"
+    echo "  - Auto-login on power on"
+    echo "  - Show 5 icons: Chrome, Lamplight, 4Youth, Office 365, Outlook"
+    echo "  - Hide all other apps, settings, terminal, and file manager"
     echo ""
-    log_info "Update check configured to run on each login."
+    echo "To temporarily unlock for admin maintenance:"
+    echo "  ./pop-setup.sh --unlock"
+    echo ""
+    echo "Please reboot for all changes to take effect."
 }
 
-# Run main function
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

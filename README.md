@@ -1,119 +1,62 @@
-# Pop OS Setup Script
+# 4Youth Pop!_OS Kiosk Setup
 
-Reproducible laptop setup for Pop!_OS with automatic update checking.
+Locks down a Pop!_OS laptop so users can only access Chrome and approved websites. Designed for 4Youth shared laptops.
 
 ## Quick Install
 
-### New Laptop Setup
-
-Run this single command on any new Pop OS laptop:
+Run on a fresh Pop!_OS laptop:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/JonHubbard1/pop-setup/main/pop-setup.sh -o ~/pop-setup.sh && chmod +x ~/pop-setup.sh && ./pop-setup.sh
+curl -sL https://git.technoliga.co.uk/jon/pop-setup/raw/branch/main/pop-setup.sh -o ~/pop-setup.sh && chmod +x ~/pop-setup.sh && ./pop-setup.sh
 ```
 
-Or download and run separately:
+## What It Does
 
-```bash
-# Download the script
-curl -sL https://raw.githubusercontent.com/JonHubbard1/pop-setup/main/pop-setup.sh -o ~/pop-setup.sh
+- **Auto-login**: Powers on straight to the desktop, no password prompt
+- **5 dock icons only**:
+  - Chrome (full browser)
+  - Lamplight (https://lamplight.online)
+  - 4Youth Website (https://4youth.org.uk)
+  - Microsoft Office 365 (https://portal.office365.com)
+  - Microsoft Outlook (https://outlook.office365.com)
+- **Everything else hidden**: terminal, file manager, settings, software centre, text editors, all other apps
+- **Keyboard shortcuts disabled**: no Super key overview, no Alt+F2 run dialog, no Ctrl+Alt+T terminal
+- **Power management**: battery profile, TLP for laptop battery life
+- **Auto-update**: checks for script updates on each login
 
-# Make executable
-chmod +x ~/pop-setup.sh
-
-# Run setup
-./pop-setup.sh
-```
-
-## Features
-
-- **System Updates**: Full apt update/upgrade
-- **Pop OS Tools**: system76-power, preload, TLP
-- **Power Management**: Battery profile, CPU governor, GPU config
-- **Desktop Apps**: Chrome (default browser), Discord, Slack, LibreOffice
-- **Dev Tools**: Git, neovim, tmux, zsh, jq, ripgrep, fzf
-- **Auto-login**: Password-free login with Chrome SSO auto-launch
-- **Dock Icons**: Pinned shortcuts for Microsoft 365, Outlook, Teams, etc.
-- **Auto-update**: Checks GitHub on each login (max 3 delays)
-
-## Update Commands
+## Commands
 
 | Command | Description |
 |---------|-------------|
-| `./pop-setup.sh` | Run full setup |
+| `./pop-setup.sh` | Run full kiosk setup |
+| `./pop-setup.sh --unlock` | Remove lockdown for admin maintenance |
 | `./pop-setup.sh --check-update` | Check and prompt for update |
 | `./pop-setup.sh --apply-update` | Apply update immediately |
 | `./pop-setup.sh --setup-login` | Configure login-time update check |
 | `./pop-setup.sh --reset-delay` | Reset the delay counter |
 
-## GitHub Repository
+## Admin Maintenance
 
-### Public vs Private
+To temporarily unlock a laptop for admin work:
 
-**Public Repository** (current setup):
-- Anyone can view the code
-- Laptops can fetch updates via HTTPS without authentication
-- Updates work automatically
-
-**Private Repository**:
-- Code is private to your organization
-- Requires authentication (SSH key or Personal Access Token)
-- To use private repo, laptops need:
-  1. SSH key added to GitHub account, OR
-  2. Personal Access Token configured
-
-To switch to private repo:
-1. Create private repo on GitHub
-2. Push code: `git remote set-url origin git@github.com:JonHubbard1/pop-setup.git && git push`
-3. Update `GITHUB_REPO` in script
-4. Ensure each laptop has SSH access
-
-### Security Considerations
-
-This script is **safe and auditable**:
-
-- **No hidden commands**: All operations are visible in the script
-- **No network callbacks**: Only fetches from your GitHub repo
-- **No credentials stored**: Uses sudo prompts, doesn't store passwords
-- **Backups created**: Existing configs are backed up before changes
-- **Idempotent**: Safe to run multiple times
-- **Reviewable**: Code is public for anyone to audit
-
-**What the script does NOT do:**
-- Phone home or beacon to external servers
-- Store or transmit credentials
-- Download code from untrusted sources
-- Modify system files outside expected paths
-- Disable security features
-
-**To verify safety:**
 ```bash
-# Review the script before running
-cat ~/pop-setup.sh | less
+./pop-setup.sh --unlock
+```
 
-# Or view on GitHub
-https://github.com/JonHubbard1/pop-setup/main/pop-setup.sh
+This restores access to terminal, settings, file manager, etc. Run the full setup again afterwards to re-lock:
+
+```bash
+./pop-setup.sh
 ```
 
 ## Update Flow
 
-When an update is available:
-
-1. **Login** → Update check runs automatically
-2. **Prompt** shows:
-   - Option 1: Update now (downloads and re-runs)
-   - Option 2: Delay (reminds next login, 3 max)
-   - Option 3: Skip this version
-3. **After 3 delays** → Update is forced
-
-## Customization
-
-Edit the script to customize:
-
-- **Websites**: Modify the `websites` array in `configure_dock_icons()`
-- **Apps**: Add packages to `install_desktop_apps()`
-- **Power**: Adjust profiles in `configure_power()`
-- **Auto-launch**: Change URL in `configure_autologin()`
+1. On login, the script checks for a newer version from Gitea
+2. If an update is available, the user is prompted:
+   - Update now (recommended)
+   - Delay (max 3 times, then forced)
+   - Skip this version
+3. Updates download and re-run the setup automatically
 
 ## Files Created
 
@@ -121,16 +64,22 @@ Edit the script to customize:
 |------|---------|
 | `~/pop-setup.sh` | Main script |
 | `~/.pop-setup-backups/` | Config backups |
-| `~/.pop-setup-delay-count` | Delay tracking |
+| `~/.pop-setup-delay-count` | Update delay tracking |
+| `~/.pop-setup-skipped-version` | Skipped version hash |
 | `~/.config/systemd/user/pop-setup-check.service` | Login update check |
-| `~/.local/share/applications/chrome-*.desktop` | Dock shortcuts |
+| `~/.local/share/applications/4youth-*.desktop` | Website shortcuts |
 
 ## Security Notes
 
-- Auto-login requires **full disk encryption** (enable during Pop OS install)
+- **Enable full disk encryption** during Pop!_OS install (auto-login means physical access = logged in)
 - Script never runs as root (uses sudo for privileged operations)
-- Backups created before modifying configs
-- All operations are logged and reversible
+- Configs are backed up before modification
+- All operations are visible and auditable in the script
+- Only fetches updates from your Gitea instance
+
+## Repository
+
+Hosted at `git.technoliga.co.uk/jon/pop-setup`.
 
 ## License
 

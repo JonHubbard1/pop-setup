@@ -1,10 +1,12 @@
 # Pop OS Setup Script - Git Ignore
-# Only track pop-setup.sh and README.md
+# Only track the script, docs, and icons
 
-# Allow these files first
+# Ignore everything by default
+*
+
+# Allow these files and folders
 !.gitignore
 !pop-setup.sh
 !README.md
-
-# Ignore everything else
-*
+!icons/
+!icons/*.png
