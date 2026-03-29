@@ -16,11 +16,14 @@ GITEA_BASE="https://git.technoliga.co.uk"
 GITEA_REPO="jon/pop-setup"
 GITEA_BRANCH="main"
 SCRIPT_URL="${GITEA_BASE}/${GITEA_REPO}/raw/branch/${GITEA_BRANCH}/pop-setup.sh"
+CONFIG_URL="${GITEA_BASE}/${GITEA_REPO}/raw/branch/${GITEA_BRANCH}/config.json"
 ASSETS_URL="${GITEA_BASE}/${GITEA_REPO}/raw/branch/${GITEA_BRANCH}/icons"
 
 # Local install paths for assets
 ICON_DIR="/usr/share/icons/4youth"
 WALLPAPER_DIR="/usr/share/backgrounds/4youth"
+CONFIG_DIR="$HOME/.config/4youth"
+CONFIG_FILE="$CONFIG_DIR/config.json"
 
 # 4Youth brand colour (from logo)
 BRAND_COLOUR="#1DA1D4"
@@ -160,47 +163,79 @@ configure_autologin() {
 }
 
 # ============================================================
-# 5. Install Icons & Assets
+# 5. Download Config & Install Assets
 # ============================================================
+download_config() {
+    log_info "Downloading configuration..."
+
+    mkdir -p "$CONFIG_DIR"
+
+    # Ensure jq is available for parsing config
+    if ! command -v jq &> /dev/null; then
+        sudo apt install -y jq
+    fi
+
+    curl -sL "$CONFIG_URL" -o "$CONFIG_FILE.tmp"
+    if [[ -s "$CONFIG_FILE.tmp" ]]; then
+        # Validate it's valid JSON
+        if jq empty "$CONFIG_FILE.tmp" 2>/dev/null; then
+            mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+            log_success "Configuration downloaded"
+        else
+            rm -f "$CONFIG_FILE.tmp"
+            log_warn "Downloaded config is not valid JSON — keeping existing config"
+        fi
+    else
+        rm -f "$CONFIG_FILE.tmp"
+        log_warn "Could not download config.json — using existing config"
+    fi
+
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        log_error "No config.json available — cannot continue"
+        exit 1
+    fi
+}
+
 install_assets() {
     log_info "Installing icons and assets..."
 
     sudo mkdir -p "$ICON_DIR" "$WALLPAPER_DIR"
 
-    # Icon files in the repo -> local icon names
-    declare -A icon_files=(
-        ["Chrome.png"]="chrome.png"
-        ["lamplight.png"]="lamplight.png"
-        ["4youth.png"]="4youth.png"
-        ["office365.png"]="office365.png"
-        ["Outlook.png"]="outlook.png"
-    )
+    # Download icons referenced in config
+    local icon_files
+    icon_files=$(jq -r '.bookmarks[].icon' "$CONFIG_FILE" | sort -u)
 
-    for remote_name in "${!icon_files[@]}"; do
-        local local_name="${icon_files[$remote_name]}"
+    while IFS= read -r icon_name; do
+        [[ -z "$icon_name" || "$icon_name" == "null" ]] && continue
+        local local_name
+        local_name=$(echo "$icon_name" | tr '[:upper:]' '[:lower:]')
         local dest="$ICON_DIR/$local_name"
-        if [[ ! -f "$dest" ]]; then
-            curl -sL "${ASSETS_URL}/${remote_name}" -o "/tmp/${local_name}"
-            if [[ -s "/tmp/${local_name}" ]]; then
-                sudo mv "/tmp/${local_name}" "$dest"
-                log_info "Installed icon: $local_name"
-            else
-                rm -f "/tmp/${local_name}"
-                log_warn "Failed to download icon: $remote_name"
-            fi
+        curl -sL "${ASSETS_URL}/${icon_name}" -o "/tmp/${local_name}"
+        if [[ -s "/tmp/${local_name}" ]]; then
+            sudo mv "/tmp/${local_name}" "$dest"
+            log_info "Installed icon: $icon_name"
+        else
+            rm -f "/tmp/${local_name}"
+            log_warn "Failed to download icon: $icon_name"
         fi
-    done
+    done <<< "$icon_files"
 
-    # Optional wallpaper
-    if [[ ! -f "$WALLPAPER_DIR/wallpaper.png" ]]; then
-        curl -sL "${ASSETS_URL}/wallpaper.png" -o "/tmp/wallpaper.png"
+    # Download wallpaper if config says to use one
+    local wallpaper_setting
+    wallpaper_setting=$(jq -r '.wallpaper // "brand-colour"' "$CONFIG_FILE")
+
+    if [[ "$wallpaper_setting" != "brand-colour" ]]; then
+        curl -sL "${ASSETS_URL}/${wallpaper_setting}" -o "/tmp/wallpaper.png"
         if [[ -s "/tmp/wallpaper.png" ]]; then
             sudo mv "/tmp/wallpaper.png" "$WALLPAPER_DIR/wallpaper.png"
             log_info "Installed wallpaper"
         else
             rm -f "/tmp/wallpaper.png"
-            log_info "No wallpaper image found — will use solid brand colour"
+            log_warn "Wallpaper image not found — will fall back to brand colour"
         fi
+    else
+        # Clean up any old wallpaper if admin switched back to brand colour
+        sudo rm -f "$WALLPAPER_DIR/wallpaper.png"
     fi
 
     log_success "Assets installed"
@@ -215,78 +250,64 @@ create_desktop_shortcuts() {
     local apps_dir="$HOME/.local/share/applications"
     mkdir -p "$apps_dir"
 
-    # Define the 5 shortcuts and their icons
-    declare -A shortcuts=(
-        ["Chrome"]="google-chrome"
-        ["Lamplight"]="https://lamplight.online"
-        ["4Youth Website"]="https://4youth.org.uk"
-        ["Microsoft Office 365"]="https://portal.office365.com"
-        ["Microsoft Outlook"]="https://outlook.office365.com"
-    )
-
-    declare -A icons=(
-        ["Chrome"]="$ICON_DIR/chrome.png"
-        ["Lamplight"]="$ICON_DIR/lamplight.png"
-        ["4Youth Website"]="$ICON_DIR/4youth.png"
-        ["Microsoft Office 365"]="$ICON_DIR/office365.png"
-        ["Microsoft Outlook"]="$ICON_DIR/outlook.png"
-    )
+    # Remove old 4youth- shortcuts so removed bookmarks disappear
+    rm -f "$apps_dir"/4youth-*.desktop
 
     # Desktop file IDs for dock pinning (in order)
     local dock_ids=()
 
-    for name in "Chrome" "Lamplight" "4Youth Website" "Microsoft Office 365" "Microsoft Outlook"; do
-        local target="${shortcuts[$name]}"
-        local icon="${icons[$name]}"
+    local count
+    count=$(jq '.bookmarks | length' "$CONFIG_FILE")
 
-        # Fall back to generic Chrome icon if custom icon is missing
-        [[ -f "$icon" ]] || icon="google-chrome"
+    for (( i=0; i<count; i++ )); do
+        local name url icon_file
+        name=$(jq -r ".bookmarks[$i].name" "$CONFIG_FILE")
+        url=$(jq -r ".bookmarks[$i].url" "$CONFIG_FILE")
+        icon_file=$(jq -r ".bookmarks[$i].icon" "$CONFIG_FILE")
 
-        if [[ "$name" == "Chrome" ]]; then
-            # Create a custom Chrome .desktop so it uses our icon
-            local chrome_desktop="$apps_dir/4youth-chrome.desktop"
-            cat > "$chrome_desktop" << EOF
+        # Resolve icon path (lowercase to match install_assets)
+        local icon_path="$ICON_DIR/$(echo "$icon_file" | tr '[:upper:]' '[:lower:]')"
+        [[ -f "$icon_path" ]] || icon_path="google-chrome"
+
+        local safe_name
+        safe_name=$(echo "$name" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')
+
+        if [[ "$url" == "google-chrome" ]]; then
+            # Full browser shortcut
+            cat > "$apps_dir/4youth-${safe_name}.desktop" << EOF
 [Desktop Entry]
 Version=1.0
-Name=Chrome
-Comment=Open Google Chrome
+Name=${name}
+Comment=Open ${name}
 Exec=/usr/bin/google-chrome-stable --no-first-run --no-default-browser-check %U
-Icon=${icon}
+Icon=${icon_path}
 Terminal=false
 Type=Application
 Categories=Network;
 MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
 StartupWMClass=google-chrome
 EOF
-            dock_ids+=("4youth-chrome.desktop")
-            log_info "Created shortcut: Chrome (custom icon)"
-            continue
-        fi
-
-        # Create a Chrome --app shortcut for each website
-        local safe_name
-        safe_name=$(echo "$name" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')
-        local desktop_file="$apps_dir/4youth-${safe_name}.desktop"
-        local desktop_id="4youth-${safe_name}.desktop"
-
-        cat > "$desktop_file" << EOF
+        else
+            # Chrome --app shortcut for a website
+            cat > "$apps_dir/4youth-${safe_name}.desktop" << EOF
 [Desktop Entry]
 Version=1.0
 Name=${name}
 Comment=Open ${name}
-Exec=/usr/bin/google-chrome-stable --app=${target} --no-first-run --no-default-browser-check
-Icon=${icon}
+Exec=/usr/bin/google-chrome-stable --app=${url} --no-first-run --no-default-browser-check
+Icon=${icon_path}
 Terminal=false
 Type=Application
 Categories=Network;
 StartupWMClass=chrome-${safe_name}
 EOF
+        fi
 
-        dock_ids+=("$desktop_id")
-        log_info "Created shortcut: ${name} -> ${target}"
+        dock_ids+=("4youth-${safe_name}.desktop")
+        log_info "Created shortcut: ${name}"
     done
 
-    # Pin exactly these 5 items to the dock (nothing else)
+    # Pin exactly these items to the dock (nothing else)
     local favorites_str
     favorites_str=$(printf "'%s', " "${dock_ids[@]}")
     favorites_str="[${favorites_str%, }]"
@@ -451,19 +472,108 @@ disable_unnecessary_services() {
 set_wallpaper() {
     log_info "Setting desktop wallpaper..."
 
-    if [[ -f "$WALLPAPER_DIR/wallpaper.png" ]]; then
-        # Use custom wallpaper image
+    local wallpaper_setting
+    wallpaper_setting=$(jq -r '.wallpaper // "brand-colour"' "$CONFIG_FILE")
+
+    if [[ "$wallpaper_setting" != "brand-colour" ]] && [[ -f "$WALLPAPER_DIR/wallpaper.png" ]]; then
         gsettings set org.gnome.desktop.background picture-uri "file://$WALLPAPER_DIR/wallpaper.png" 2>/dev/null || true
         gsettings set org.gnome.desktop.background picture-uri-dark "file://$WALLPAPER_DIR/wallpaper.png" 2>/dev/null || true
         gsettings set org.gnome.desktop.background picture-options 'zoom' 2>/dev/null || true
         log_success "Wallpaper set (custom image)"
     else
-        # Fall back to solid 4Youth brand colour
+        gsettings set org.gnome.desktop.background picture-uri '' 2>/dev/null || true
+        gsettings set org.gnome.desktop.background picture-uri-dark '' 2>/dev/null || true
         gsettings set org.gnome.desktop.background picture-options 'none' 2>/dev/null || true
         gsettings set org.gnome.desktop.background primary-color "$BRAND_COLOUR" 2>/dev/null || true
         gsettings set org.gnome.desktop.background color-shading-type 'solid' 2>/dev/null || true
         log_success "Wallpaper set (4Youth brand colour)"
     fi
+}
+
+# ============================================================
+# 10. Display Team Message
+# ============================================================
+setup_team_message() {
+    log_info "Setting up team message..."
+
+    local message
+    message=$(jq -r '.team_message // ""' "$CONFIG_FILE")
+
+    local message_html="$CONFIG_DIR/team-message.html"
+    local autostart_dir="$HOME/.config/autostart"
+    local autostart_file="$autostart_dir/4youth-team-message.desktop"
+
+    if [[ -z "$message" ]]; then
+        # No message — remove autostart and html
+        rm -f "$message_html" "$autostart_file"
+        log_info "No team message set"
+        return
+    fi
+
+    # Escape HTML in message and convert newlines to <br>
+    local escaped_message
+    escaped_message=$(echo "$message" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g' | sed ':a;N;$!ba;s/\n/<br>/g')
+
+    # Create a simple HTML page for the message
+    cat > "$message_html" << EOF
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>4Youth — Team Message</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1DA1D4;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 2rem;
+        }
+        .card {
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 2.5rem;
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
+        h1 { font-size: 1.3rem; margin-bottom: 1.5rem; font-weight: 600; }
+        .message { font-size: 1.1rem; line-height: 1.6; }
+        .close-hint {
+            margin-top: 2rem;
+            font-size: 0.85rem;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Team Message</h1>
+        <div class="message">${escaped_message}</div>
+        <div class="close-hint">Close this window to continue</div>
+    </div>
+</body>
+</html>
+EOF
+
+    # Create autostart entry to show message on login
+    mkdir -p "$autostart_dir"
+    cat > "$autostart_file" << EOF
+[Desktop Entry]
+Type=Application
+Name=4Youth Team Message
+Exec=/usr/bin/google-chrome-stable --app=file://${message_html} --no-first-run --no-default-browser-check --window-size=650,500
+StartupWMClass=4youth-team-message
+Terminal=false
+X-GNOME-Autostart-enabled=true
+EOF
+
+    log_success "Team message configured"
 }
 
 # ============================================================
@@ -729,11 +839,13 @@ main() {
     install_chrome
     configure_power
     configure_autologin
+    download_config
     install_assets
     create_desktop_shortcuts
     lockdown_desktop
     disable_unnecessary_services
     set_wallpaper
+    setup_team_message
     setup_login_check
 
     echo
@@ -741,7 +853,7 @@ main() {
     echo
     echo "The laptop will now:"
     echo "  - Auto-login on power on"
-    echo "  - Show 5 icons: Chrome, Lamplight, 4Youth, Office 365, Outlook"
+    echo "  - Show dock shortcuts configured in config.json"
     echo "  - Hide all other apps, settings, terminal, and file manager"
     echo ""
     echo "To temporarily unlock for admin maintenance:"

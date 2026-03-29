@@ -8,5 +8,7 @@
 !.gitignore
 !pop-setup.sh
 !README.md
+!config.json
+!admin.html
 !icons/
 !icons/*.png

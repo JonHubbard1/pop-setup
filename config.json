@@ -1,0 +1,31 @@
+{
+  "bookmarks": [
+    {
+      "name": "Chrome",
+      "url": "google-chrome",
+      "icon": "Chrome.png"
+    },
+    {
+      "name": "Lamplight",
+      "url": "https://lamplight.online",
+      "icon": "lamplight.png"
+    },
+    {
+      "name": "4Youth Website",
+      "url": "https://4youth.org.uk",
+      "icon": "4youth.png"
+    },
+    {
+      "name": "Microsoft Office 365",
+      "url": "https://portal.office365.com",
+      "icon": "office365.png"
+    },
+    {
+      "name": "Microsoft Outlook",
+      "url": "https://outlook.office365.com",
+      "icon": "Outlook.png"
+    }
+  ],
+  "team_message": "",
+  "wallpaper": "brand-colour"
+}
