@@ -348,7 +348,11 @@
 
 <script>
     // --- Pre-configured connection (no need for users to know these details) ---
-    const SERVER_URL = 'https://git.technoliga.co.uk';
+    // API calls are proxied through nginx to avoid CORS issues
+    // When served from popos.4youth.org.uk, /api/ proxies to git.technoliga.co.uk/api/
+    // When opened as a local file, fall back to direct Forgejo URL
+    const isLocal = window.location.protocol === 'file:';
+    const SERVER_URL = isLocal ? 'https://git.technoliga.co.uk' : '';
     const REPO_PATH = 'jon/pop-setup';
     const API_TOKEN = '616e513aca743fd235e7fc54d7fe498a260d940e';
 
