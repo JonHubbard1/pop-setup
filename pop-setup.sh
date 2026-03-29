@@ -583,14 +583,8 @@ apply_update() {
 
     log_success "Script updated!"
 
-    if [[ -t 0 ]]; then
-        # Interactive — re-run the updated script with full setup
-        log_info "Running updated script..."
-        exec "$HOME/pop-setup.sh"
-    else
-        # Non-interactive (systemd) — just update the file, don't re-run
-        log_info "Update applied. Full setup will run on next manual execution."
-    fi
+    log_info "Running updated script..."
+    exec "$HOME/pop-setup.sh"
 }
 
 setup_login_check() {
