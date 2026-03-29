@@ -124,13 +124,14 @@ configure_power() {
     log_info "Configuring power management..."
 
     if command -v system76-power &> /dev/null; then
-        sudo system76-power profile battery
-        log_info "Power profile set to battery"
+        sudo system76-power profile battery 2>/dev/null && \
+            log_info "Power profile set to battery" || \
+            log_warn "Could not set power profile (VM or unsupported hardware)"
     fi
 
     if ! command -v tlp &> /dev/null; then
         sudo apt install -y tlp tlp-rdw
-        sudo tlp start
+        sudo tlp start 2>/dev/null || log_warn "Could not start TLP"
     fi
 
     log_success "Power management configured"
