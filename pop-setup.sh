@@ -663,7 +663,7 @@ EOF
 [Desktop Entry]
 Type=Application
 Name=4Youth Team Message
-Exec=/usr/bin/google-chrome-stable --app=file://${message_html} --no-first-run --no-default-browser-check --window-size=650,500
+Exec=/usr/bin/google-chrome-stable --app=file://${message_html} --password-store=basic --no-first-run --no-default-browser-check --window-size=650,500
 StartupWMClass=4youth-team-message
 Terminal=false
 X-GNOME-Autostart-enabled=true
