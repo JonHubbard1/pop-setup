@@ -114,6 +114,7 @@ fix_chrome_repo() {
 install_prerequisites() {
     log_info "Installing prerequisites..."
     export DEBIAN_FRONTEND=noninteractive
+    fix_chrome_repo
     sudo -E apt update
     sudo -E apt install -y curl jq
     log_success "Prerequisites installed"
