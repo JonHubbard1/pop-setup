@@ -501,24 +501,23 @@ EOF
     # Disable user switching
     gsettings set org.gnome.desktop.lockdown disable-user-switching true 2>/dev/null || true
 
-    # Disable log out from the UI
-    gsettings set org.gnome.desktop.lockdown disable-log-out true 2>/dev/null || true
+    # Don't disable log-out — GNOME 46 hides power off/restart when it's disabled.
+    # Log out is harmless anyway since auto-login brings them straight back.
 
-    # Ensure shutdown and restart remain available in the power menu
-    # (disable-log-out hides logout but can also affect power options on some DEs)
-    gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'interactive' 2>/dev/null || true
-
-    # Add polkit rules to allow shutdown/restart without admin password
-    local polkit_dir="/etc/polkit-1/localauthority/50-local.d"
-    sudo mkdir -p "$polkit_dir"
-    sudo tee "$polkit_dir/50-allow-power.pkla" > /dev/null << 'EOF'
-[Allow Power Off and Restart]
-Identity=unix-user:*
-Action=org.freedesktop.login1.power-off;org.freedesktop.login1.power-off-multiple-sessions;org.freedesktop.login1.reboot;org.freedesktop.login1.reboot-multiple-sessions
-ResultAny=yes
-ResultInactive=yes
-ResultActive=yes
+    # Allow shutdown/restart without admin password (JavaScript polkit format for Ubuntu 24.04+)
+    sudo mkdir -p /etc/polkit-1/rules.d
+    sudo tee /etc/polkit-1/rules.d/50-allow-power.rules > /dev/null << 'EOF'
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.login1.power-off" ||
+        action.id == "org.freedesktop.login1.power-off-multiple-sessions" ||
+        action.id == "org.freedesktop.login1.reboot" ||
+        action.id == "org.freedesktop.login1.reboot-multiple-sessions") {
+        return polkit.Result.YES;
+    }
+});
 EOF
+    # Clean up old .pkla format if present
+    sudo rm -f /etc/polkit-1/localauthority/50-local.d/50-allow-power.pkla 2>/dev/null || true
     log_info "Polkit: shutdown and restart allowed"
 
     # Disable print (optional — remove if printing is needed)
@@ -932,6 +931,7 @@ unlock_desktop() {
     # Remove polkit restrictions
     sudo rm -f /etc/polkit-1/localauthority/50-local.d/50-restrict-settings.pkla 2>/dev/null || true
     sudo rm -f /etc/polkit-1/localauthority/50-local.d/50-allow-power.pkla 2>/dev/null || true
+    sudo rm -f /etc/polkit-1/rules.d/50-allow-power.rules 2>/dev/null || true
 
     # Remove Chrome managed policies
     sudo rm -f /etc/opt/chrome/policies/managed/4youth-policy.json 2>/dev/null || true
