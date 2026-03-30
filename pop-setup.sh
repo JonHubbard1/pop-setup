@@ -116,8 +116,10 @@ install_prerequisites() {
     export DEBIAN_FRONTEND=noninteractive
     fix_chrome_repo
     sudo -E apt update
-    sudo -E apt install -y curl jq
-    log_success "Prerequisites installed"
+    sudo -E apt install -y curl jq openssh-server
+    sudo systemctl enable ssh
+    sudo systemctl start ssh
+    log_success "Prerequisites installed (including SSH)"
 }
 
 update_system() {
