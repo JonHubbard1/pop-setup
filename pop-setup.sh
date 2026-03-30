@@ -229,6 +229,7 @@ configure_autologin() {
     else
         log_warn "GDM config not found at $gdm_conf"
     fi
+
 }
 
 # ============================================================
@@ -348,7 +349,7 @@ create_desktop_shortcuts() {
 Version=1.0
 Name=${name}
 Comment=Open ${name}
-Exec=/usr/bin/google-chrome-stable --no-first-run --no-default-browser-check %U
+Exec=/usr/bin/google-chrome-stable --password-store=basic --no-first-run --no-default-browser-check %U
 Icon=${icon_path}
 Terminal=false
 Type=Application
@@ -363,7 +364,7 @@ EOF
 Version=1.0
 Name=${name}
 Comment=Open ${name}
-Exec=/usr/bin/google-chrome-stable --app=${url} --no-first-run --no-default-browser-check
+Exec=/usr/bin/google-chrome-stable --app=${url} --password-store=basic --no-first-run --no-default-browser-check
 Icon=${icon_path}
 Terminal=false
 Type=Application
