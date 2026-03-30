@@ -17,7 +17,7 @@ curl -sL https://git.technoliga.co.uk/jon/pop-setup/raw/branch/main/pop-setup.sh
   - Chrome (full browser)
   - Lamplight (https://lamplight.online)
   - 4Youth Website (https://4youth.org.uk)
-  - Microsoft Office 365 (https://portal.office365.com)
+  - Microsoft Office 365 (https://www.office.com)
   - Microsoft Outlook (https://outlook.office365.com)
 - **Everything else hidden**: terminal, file manager, settings, software centre, text editors, all other apps
 - **Keyboard shortcuts disabled**: no Super key overview, no Alt+F2 run dialog, no Ctrl+Alt+T terminal
