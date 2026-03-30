@@ -402,10 +402,10 @@ lockdown_desktop() {
 
     # List of system .desktop files to hide from the user
     local hide_apps=(
-        # Terminals
-        "org.gnome.Terminal.desktop"
-        "io.elementary.terminal.desktop"
-        "gnome-terminal.desktop"
+        # Terminals (kept accessible for admin maintenance)
+        # "org.gnome.Terminal.desktop"
+        # "io.elementary.terminal.desktop"
+        # "gnome-terminal.desktop"
         # File managers
         "org.gnome.Nautilus.desktop"
         "nautilus.desktop"
