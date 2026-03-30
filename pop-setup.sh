@@ -158,6 +158,9 @@ install_chrome() {
         log_success "Google Chrome already installed"
     fi
 
+    # Chrome's installer adds its own repo file — clean up conflicts
+    fix_chrome_repo
+
     # Set Chrome as default browser
     xdg-settings set default-web-browser google-chrome.desktop 2>/dev/null || true
     xdg-mime default google-chrome.desktop x-scheme-handler/http 2>/dev/null || true
