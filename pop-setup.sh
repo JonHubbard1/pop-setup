@@ -481,14 +481,43 @@ EOF
     # Disable ability to open the run dialog
     gsettings set org.gnome.desktop.wm.keybindings panel-run-dialog "[]" 2>/dev/null || true
 
+    # Set up a hidden admin terminal shortcut: Ctrl+Alt+F12
+    # This gives admin access to a terminal for maintenance/unlocking
+    gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings \
+        "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/admin-terminal/']" 2>/dev/null || true
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/admin-terminal/ \
+        name 'Admin Terminal' 2>/dev/null || true
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/admin-terminal/ \
+        command '/usr/bin/gnome-terminal' 2>/dev/null || true
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/admin-terminal/ \
+        binding '<Ctrl><Alt>F12' 2>/dev/null || true
+    log_info "Admin terminal shortcut: Ctrl+Alt+F12"
+
     # Disable lock screen (they auto-login anyway, lock screen just confuses)
     gsettings set org.gnome.desktop.lockdown disable-lock-screen true 2>/dev/null || true
 
     # Disable user switching
     gsettings set org.gnome.desktop.lockdown disable-user-switching true 2>/dev/null || true
 
-    # Disable log out from the UI (admin can still reboot/shutdown via power button)
+    # Disable log out from the UI
     gsettings set org.gnome.desktop.lockdown disable-log-out true 2>/dev/null || true
+
+    # Ensure shutdown and restart remain available in the power menu
+    # (disable-log-out hides logout but can also affect power options on some DEs)
+    gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'interactive' 2>/dev/null || true
+
+    # Add polkit rules to allow shutdown/restart without admin password
+    local polkit_dir="/etc/polkit-1/localauthority/50-local.d"
+    sudo mkdir -p "$polkit_dir"
+    sudo tee "$polkit_dir/50-allow-power.pkla" > /dev/null << 'EOF'
+[Allow Power Off and Restart]
+Identity=unix-user:*
+Action=org.freedesktop.login1.power-off;org.freedesktop.login1.power-off-multiple-sessions;org.freedesktop.login1.reboot;org.freedesktop.login1.reboot-multiple-sessions
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+EOF
+    log_info "Polkit: shutdown and restart allowed"
 
     # Disable print (optional — remove if printing is needed)
     gsettings set org.gnome.desktop.lockdown disable-printing false 2>/dev/null || true
@@ -890,6 +919,7 @@ unlock_desktop() {
     gsettings reset org.gnome.mutter overlay-key 2>/dev/null || true
     gsettings reset org.gnome.shell.keybindings toggle-application-view 2>/dev/null || true
     gsettings reset org.gnome.desktop.wm.keybindings panel-run-dialog 2>/dev/null || true
+    gsettings reset org.gnome.settings-daemon.plugins.media-keys custom-keybindings 2>/dev/null || true
     gsettings reset org.gnome.desktop.lockdown disable-lock-screen 2>/dev/null || true
     gsettings reset org.gnome.desktop.lockdown disable-user-switching 2>/dev/null || true
     gsettings reset org.gnome.desktop.lockdown disable-log-out 2>/dev/null || true
@@ -897,8 +927,9 @@ unlock_desktop() {
     # Re-enable show-apps button
     gsettings reset org.gnome.shell.extensions.dash-to-dock show-show-apps-button 2>/dev/null || true
 
-    # Remove polkit restriction
+    # Remove polkit restrictions
     sudo rm -f /etc/polkit-1/localauthority/50-local.d/50-restrict-settings.pkla 2>/dev/null || true
+    sudo rm -f /etc/polkit-1/localauthority/50-local.d/50-allow-power.pkla 2>/dev/null || true
 
     # Remove Chrome managed policies
     sudo rm -f /etc/opt/chrome/policies/managed/4youth-policy.json 2>/dev/null || true
