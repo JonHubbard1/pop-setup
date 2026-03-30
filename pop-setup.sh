@@ -122,7 +122,11 @@ update_system() {
     fix_chrome_repo
     export DEBIAN_FRONTEND=noninteractive
     sudo -E apt update
-    sudo -E apt upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
+    sudo -E apt upgrade -y --fix-missing -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" || {
+        log_warn "Some packages failed to upgrade — retrying..."
+        sudo -E apt update
+        sudo -E apt upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" || log_warn "Some upgrades failed — continuing anyway"
+    }
     sudo -E apt autoremove -y
     log_success "System updated"
 }
