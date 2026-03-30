@@ -111,17 +111,19 @@ fix_chrome_repo() {
 
 install_prerequisites() {
     log_info "Installing prerequisites..."
-    sudo apt update
-    sudo apt install -y curl jq
+    export DEBIAN_FRONTEND=noninteractive
+    sudo -E apt update
+    sudo -E apt install -y curl jq
     log_success "Prerequisites installed"
 }
 
 update_system() {
     log_info "Updating system packages..."
     fix_chrome_repo
-    sudo apt update
-    sudo apt upgrade -y
-    sudo apt autoremove -y
+    export DEBIAN_FRONTEND=noninteractive
+    sudo -E apt update
+    sudo -E apt upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
+    sudo -E apt autoremove -y
     log_success "System updated"
 }
 
