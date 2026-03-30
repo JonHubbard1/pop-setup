@@ -106,7 +106,9 @@ fix_chrome_repo() {
             dominated=true
         fi
     fi
-    [[ "$dominated" == "true" ]] && log_info "Cleaned up conflicting Chrome repo entries"
+    if [[ "$dominated" == "true" ]]; then
+        log_info "Cleaned up conflicting Chrome repo entries"
+    fi
 }
 
 install_prerequisites() {
