@@ -449,6 +449,25 @@
             </div>
         </div>
 
+        <!-- Change Password -->
+        <div class="card">
+            <h2>Change Admin Password</h2>
+            <p class="card-desc">Change the password used to sign in to this management page.</p>
+            <div class="form-group">
+                <label for="current-password">Current Password</label>
+                <input type="password" id="current-password" placeholder="Enter current password">
+            </div>
+            <div class="form-group mt-1">
+                <label for="new-password">New Password</label>
+                <input type="password" id="new-password" placeholder="Enter new password">
+            </div>
+            <div class="form-group mt-1">
+                <label for="confirm-password">Confirm New Password</label>
+                <input type="password" id="confirm-password" placeholder="Confirm new password">
+            </div>
+            <button class="btn btn-primary mt-1" onclick="changePassword()">Update Password</button>
+        </div>
+
     </div>
 </div>
 
@@ -472,8 +491,8 @@
     const REPO_PATH = 'jon/pop-setup';
     const API_TOKEN = '616e513aca743fd235e7fc54d7fe498a260d940e';
 
-    // Simple password gate — keeps non-technical users from accidentally editing
-    const ADMIN_PASSWORD = 'ChangeMe4Youth!2026';
+    // Password is stored in config.json and loaded on login
+    let adminPassword = null;
 
     let currentConfig = null;
     let originalConfig = null;
@@ -485,17 +504,20 @@
         const password = document.getElementById('login-password').value;
         const errorEl = document.getElementById('login-error');
 
-        if (password !== ADMIN_PASSWORD) {
-            errorEl.style.display = 'block';
-            return;
-        }
-        errorEl.style.display = 'none';
-
         try {
+            // Fetch config to get the current password
             const response = await apiGet(`/repos/${REPO_PATH}`);
             if (!response.ok) throw new Error('Could not connect');
 
             await loadConfig();
+
+            if (password !== (currentConfig.admin_password || '4YouthSN127NY')) {
+                errorEl.style.display = 'block';
+                return;
+            }
+            errorEl.style.display = 'none';
+
+            adminPassword = currentConfig.admin_password;
             loadDevices();
 
             document.getElementById('login-panel').style.display = 'none';
@@ -566,29 +588,32 @@
         }
     }
 
+    async function saveConfigToServer() {
+        const content = btoa(unescape(encodeURIComponent(JSON.stringify(currentConfig, null, 2) + '\n')));
+
+        const response = await apiPut(`/repos/${REPO_PATH}/contents/config.json`, {
+            message: 'Update kiosk config via admin panel',
+            content: content,
+            sha: configSha
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.message || 'Save failed');
+        }
+
+        const data = await response.json();
+        configSha = data.content.sha;
+        originalConfig = JSON.parse(JSON.stringify(currentConfig));
+    }
+
     async function saveConfig() {
         const btn = document.getElementById('save-btn');
         btn.disabled = true;
         btn.textContent = 'Saving...';
 
         try {
-            const content = btoa(unescape(encodeURIComponent(JSON.stringify(currentConfig, null, 2) + '\n')));
-
-            const response = await apiPut(`/repos/${REPO_PATH}/contents/config.json`, {
-                message: 'Update kiosk config via admin panel',
-                content: content,
-                sha: configSha
-            });
-
-            if (!response.ok) {
-                const err = await response.json();
-                throw new Error(err.message || 'Save failed');
-            }
-
-            const data = await response.json();
-            configSha = data.content.sha;
-            originalConfig = JSON.parse(JSON.stringify(currentConfig));
-
+            await saveConfigToServer();
             checkChanges();
             showToast('Saved! Laptops will update on next restart.', 'success');
         } catch (e) {
@@ -603,6 +628,39 @@
         currentConfig = JSON.parse(JSON.stringify(originalConfig));
         renderAll();
         checkChanges();
+    }
+
+    // --- Change Password ---
+
+    async function changePassword() {
+        const current = document.getElementById('current-password').value;
+        const newPw = document.getElementById('new-password').value;
+        const confirm = document.getElementById('confirm-password').value;
+
+        if (current !== (currentConfig.admin_password || '4YouthSN127NY')) {
+            showToast('Current password is incorrect', 'error');
+            return;
+        }
+        if (!newPw || newPw.length < 6) {
+            showToast('New password must be at least 6 characters', 'error');
+            return;
+        }
+        if (newPw !== confirm) {
+            showToast('New passwords do not match', 'error');
+            return;
+        }
+
+        currentConfig.admin_password = newPw;
+        try {
+            await saveConfigToServer();
+            adminPassword = newPw;
+            document.getElementById('current-password').value = '';
+            document.getElementById('new-password').value = '';
+            document.getElementById('confirm-password').value = '';
+            showToast('Password updated successfully', 'success');
+        } catch (e) {
+            showToast('Failed to save new password', 'error');
+        }
     }
 
     // --- Bookmarks ---
@@ -799,9 +857,24 @@
 
     // --- Auto-restore session ---
 
+    async function restoreSession() {
+        try {
+            const response = await apiGet(`/repos/${REPO_PATH}`);
+            if (!response.ok) throw new Error('Could not connect');
+
+            await loadConfig();
+            loadDevices();
+
+            document.getElementById('login-panel').style.display = 'none';
+            document.getElementById('admin-panel').style.display = 'block';
+        } catch (e) {
+            sessionStorage.removeItem('kiosk-authed');
+        }
+    }
+
     (function() {
         if (sessionStorage.getItem('kiosk-authed') === 'true') {
-            connect();
+            restoreSession();
         }
     })();
 </script>
