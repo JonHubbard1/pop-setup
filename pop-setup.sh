@@ -948,6 +948,11 @@ main() {
         case $1 in
             --check-update)
                 check_not_root
+                # Always refresh config and team message on login
+                download_config
+                setup_team_message
+                register_device
+                # Then check for script updates
                 check_for_updates && prompt_update
                 exit 0
                 ;;
