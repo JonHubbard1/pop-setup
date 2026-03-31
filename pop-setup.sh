@@ -677,15 +677,19 @@ register_device() {
 check_for_updates() {
     log_info "Checking for script updates..."
 
-    local local_hash remote_content remote_hash
+    local local_hash remote_hash
+    local remote_tmp="/tmp/pop-setup-remote.sh"
+
     local_hash=$(md5sum "$HOME/pop-setup.sh" 2>/dev/null | cut -d' ' -f1)
 
-    remote_content=$(curl -sL "$SCRIPT_URL" 2>/dev/null || echo "")
-    if [[ -z "$remote_content" ]]; then
+    curl -sL "$SCRIPT_URL" -o "$remote_tmp" 2>/dev/null
+    if [[ ! -s "$remote_tmp" ]]; then
         log_warn "Could not fetch remote script (network issue?)"
+        rm -f "$remote_tmp"
         return 1
     fi
-    remote_hash=$(echo "$remote_content" | md5sum | cut -d' ' -f1)
+    remote_hash=$(md5sum "$remote_tmp" | cut -d' ' -f1)
+    rm -f "$remote_tmp"
 
     if [[ "$local_hash" != "$remote_hash" ]]; then
         if [[ -f "$SKIP_FILE" ]] && [[ "$(cat "$SKIP_FILE")" == "$remote_hash" ]]; then
@@ -758,11 +762,12 @@ prompt_update() {
             log_info "Update delayed. $((delays_remaining - 1)) delay(s) remaining."
             ;;
         3)
-            local remote_content
-            remote_content=$(curl -sL "$SCRIPT_URL" 2>/dev/null || echo "")
-            if [[ -n "$remote_content" ]]; then
-                echo "$remote_content" | md5sum | cut -d' ' -f1 > "$SKIP_FILE"
+            local skip_tmp="/tmp/pop-setup-skip.sh"
+            curl -sL "$SCRIPT_URL" -o "$skip_tmp" 2>/dev/null
+            if [[ -s "$skip_tmp" ]]; then
+                md5sum "$skip_tmp" | cut -d' ' -f1 > "$SKIP_FILE"
             fi
+            rm -f "$skip_tmp"
             reset_delay
             log_info "Version skipped."
             ;;
