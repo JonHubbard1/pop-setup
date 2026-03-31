@@ -592,78 +592,20 @@ set_wallpaper() {
 setup_team_message() {
     log_info "Setting up team message..."
 
-    local message
-    message=$(curl -sL "${DEVICE_API}?action=get-message" 2>/dev/null | jq -r '.message // ""')
-
-    local message_html="$CONFIG_DIR/team-message.html"
+    local message_url="https://popos.4youth.org.uk/message.php"
     local autostart_dir="$HOME/.config/autostart"
     local autostart_file="$autostart_dir/4youth-team-message.desktop"
 
-    if [[ -z "$message" ]]; then
-        # No message — remove autostart and html
-        rm -f "$message_html" "$autostart_file"
-        log_info "No team message set"
-        return
-    fi
+    # Clean up old local HTML if it exists
+    rm -f "$CONFIG_DIR/team-message.html"
 
-    # Escape HTML in message and convert newlines to <br>
-    local escaped_message
-    escaped_message=$(echo "$message" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g' | sed ':a;N;$!ba;s/\n/<br>/g')
-
-    # Create a simple HTML page for the message
-    cat > "$message_html" << EOF
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>4Youth — Team Message</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #1DA1D4;
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            margin: 0;
-            padding: 2rem;
-        }
-        .card {
-            background: rgba(255,255,255,0.15);
-            backdrop-filter: blur(10px);
-            border-radius: 16px;
-            padding: 2.5rem;
-            max-width: 600px;
-            width: 100%;
-            text-align: center;
-        }
-        h1 { font-size: 1.3rem; margin-bottom: 1.5rem; font-weight: 600; }
-        .message { font-size: 1.1rem; line-height: 1.6; }
-        .close-hint {
-            margin-top: 2rem;
-            font-size: 0.85rem;
-            opacity: 0.7;
-        }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>Team Message</h1>
-        <div class="message">${escaped_message}</div>
-        <div class="close-hint">Close this window to continue</div>
-    </div>
-</body>
-</html>
-EOF
-
-    # Create autostart entry to show message on login
+    # Create autostart entry to show message on login (server-rendered, always current)
     mkdir -p "$autostart_dir"
     cat > "$autostart_file" << EOF
 [Desktop Entry]
 Type=Application
 Name=4Youth Team Message
-Exec=/usr/bin/google-chrome-stable --app=file://${message_html} --password-store=basic --no-first-run --no-default-browser-check --window-size=650,500
+Exec=/usr/bin/google-chrome-stable --app=${message_url} --password-store=basic --no-first-run --no-default-browser-check --window-size=650,500
 StartupWMClass=4youth-team-message
 Terminal=false
 X-GNOME-Autostart-enabled=true
