@@ -593,7 +593,7 @@ setup_team_message() {
     log_info "Setting up team message..."
 
     local message
-    message=$(jq -r '.team_message // ""' "$CONFIG_FILE")
+    message=$(curl -sL "${DEVICE_API}?action=get-message" 2>/dev/null | jq -r '.message // ""')
 
     local message_html="$CONFIG_DIR/team-message.html"
     local autostart_dir="$HOME/.config/autostart"

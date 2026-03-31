@@ -5,6 +5,8 @@
  * POST /api.php?action=register  — Register/update a device and log a boot
  * GET  /api.php?action=devices   — List all registered devices
  * GET  /api.php?action=device&id=xxx — Get a single device with boot history
+ * GET  /api.php?action=get-message — Get the current team message (raw text)
+ * POST /api.php?action=save-message — Save team message (requires admin_password)
  */
 
 header('Content-Type: application/json');
@@ -63,6 +65,12 @@ try {
             break;
         case 'device':
             handleDevice();
+            break;
+        case 'get-message':
+            handleGetMessage();
+            break;
+        case 'save-message':
+            handleSaveMessage();
             break;
         default:
             http_response_code(400);
@@ -180,4 +188,45 @@ function handleDevice(): void {
     $device['boots'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     echo json_encode($device);
+}
+
+function getMessageFile(): string {
+    return __DIR__ . '/data/team-message.txt';
+}
+
+function handleGetMessage(): void {
+    $file = getMessageFile();
+    $message = file_exists($file) ? file_get_contents($file) : '';
+    echo json_encode(['message' => $message]);
+}
+
+function handleSaveMessage(): void {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['error' => 'POST required']);
+        return;
+    }
+
+    $input = json_decode(file_get_contents('php://input'), true);
+    if ($input === null) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid JSON']);
+        return;
+    }
+
+    // Authenticate using the admin password from config.json
+    $configPath = __DIR__ . '/config.json';
+    $config = json_decode(file_get_contents($configPath), true);
+    $adminPassword = $config['admin_password'] ?? '';
+
+    if (empty($adminPassword) || ($input['password'] ?? '') !== $adminPassword) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Invalid password']);
+        return;
+    }
+
+    $message = $input['message'] ?? '';
+    file_put_contents(getMessageFile(), $message);
+
+    echo json_encode(['status' => 'ok']);
 }

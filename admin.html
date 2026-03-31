@@ -412,7 +412,7 @@
         <!-- Team Message -->
         <div class="card">
             <h2>Team Message</h2>
-            <p class="card-desc">This message pops up on every laptop when it starts. Leave empty to show nothing.</p>
+            <p class="card-desc">This message pops up on every laptop when it starts. Leave empty to show nothing. Changes are saved automatically.</p>
             <div class="form-group">
                 <textarea id="team-message" placeholder="e.g. Wi-Fi password: Example123&#10;&#10;Please report any issues to reception."></textarea>
             </div>
@@ -519,6 +519,7 @@
 
             adminPassword = currentConfig.admin_password;
             loadDevices();
+            loadTeamMessage();
 
             document.getElementById('login-panel').style.display = 'none';
             document.getElementById('admin-panel').style.display = 'block';
@@ -721,8 +722,19 @@
 
     // --- Team Message ---
 
+    async function loadTeamMessage() {
+        try {
+            const response = await fetch(`${DEVICE_API}/api.php?action=get-message`);
+            if (!response.ok) throw new Error('Could not load message');
+            const data = await response.json();
+            document.getElementById('team-message').value = data.message || '';
+        } catch (e) {
+            document.getElementById('team-message').value = '';
+        }
+    }
+
     function renderTeamMessage() {
-        document.getElementById('team-message').value = currentConfig.team_message || '';
+        // Team message is loaded separately via loadTeamMessage()
     }
 
     // --- Wallpaper ---
@@ -753,9 +765,24 @@
 
     // --- Event listeners ---
 
+    // Team message saves directly to server, not via config.json
+    let teamMessageTimer = null;
     document.getElementById('team-message').addEventListener('input', function() {
-        currentConfig.team_message = this.value;
-        checkChanges();
+        clearTimeout(teamMessageTimer);
+        const message = this.value;
+        teamMessageTimer = setTimeout(async () => {
+            try {
+                const response = await fetch(`${DEVICE_API}/api.php?action=save-message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: adminPassword, message: message })
+                });
+                if (!response.ok) throw new Error('Save failed');
+                showToast('Team message saved', 'success');
+            } catch (e) {
+                showToast('Could not save team message', 'error');
+            }
+        }, 1000);
     });
 
     // --- Helpers ---
@@ -864,6 +891,7 @@
 
             await loadConfig();
             loadDevices();
+            loadTeamMessage();
 
             document.getElementById('login-panel').style.display = 'none';
             document.getElementById('admin-panel').style.display = 'block';
