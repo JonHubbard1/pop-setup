@@ -898,11 +898,16 @@ main() {
                 check_not_root
                 # Always refresh config, shortcuts, and team message on login
                 download_config
-                install_assets
                 create_desktop_shortcuts
                 set_wallpaper
                 setup_team_message
-                register_device
+                # These need sudo — skip silently if user has no sudo access
+                if sudo -n true 2>/dev/null; then
+                    install_assets
+                    register_device
+                else
+                    log_info "Skipping asset install and device registration (no sudo)"
+                fi
                 # Then check for script updates
                 check_for_updates && prompt_update
                 exit 0
