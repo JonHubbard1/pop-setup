@@ -335,6 +335,76 @@
             font-size: 0.9rem;
         }
 
+        /* Laptop detail modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .modal {
+            background: white;
+            border-radius: 12px;
+            width: 100%;
+            max-width: 700px;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1.2rem 1.5rem;
+            border-bottom: 1px solid #eee;
+        }
+        .modal-header h2 { font-size: 1.15rem; }
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #999;
+            padding: 0 0.3rem;
+        }
+        .modal-close:hover { color: #333; }
+        .modal-body { padding: 1.5rem; }
+        .session-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+        }
+        .session-table th {
+            text-align: left;
+            padding: 0.6rem 0.8rem;
+            border-bottom: 2px solid #eee;
+            color: #666;
+            font-weight: 600;
+            font-size: 0.82rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .session-table td {
+            padding: 0.6rem 0.8rem;
+            border-bottom: 1px solid #f0f2f5;
+        }
+        .session-table tr:hover td { background: #f8f9fa; }
+        .session-active {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #27ae60;
+            margin-right: 0.4rem;
+            vertical-align: middle;
+        }
+        .laptop-item { cursor: pointer; transition: border-color 0.2s; }
+        .laptop-item:hover { border-color: #1DA1D4; }
+
         /* Info banner */
         .info-banner {
             background: #e8f6fc;
@@ -479,6 +549,21 @@
             <button class="btn btn-primary mt-1" onclick="changePassword()">Update Password</button>
         </div>
 
+    </div>
+</div>
+
+<!-- Laptop detail modal -->
+<div id="laptop-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeLaptopModal()">
+    <div class="modal">
+        <div class="modal-header">
+            <h2 id="modal-hostname">Laptop</h2>
+            <button class="modal-close" onclick="closeLaptopModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="modal-device-info" style="margin-bottom:1.2rem;"></div>
+            <h3 style="font-size:1rem; margin-bottom:0.6rem;">Usage Log</h3>
+            <div id="modal-sessions"></div>
+        </div>
     </div>
 </div>
 
@@ -925,16 +1010,16 @@
             }
 
             container.innerHTML = '';
-            const now = new Date();
 
             devices.forEach(device => {
-                const lastBootDate = device.last_boot ? new Date(device.last_boot + 'Z') : null;
-                const isRecent = lastBootDate && (now - lastBootDate) < 24 * 60 * 60 * 1000;
+                // Active = last boot exists and has no shutdown time
+                const isActive = device.last_boot && !device.last_shutdown;
 
                 const div = document.createElement('div');
                 div.className = 'laptop-item';
+                div.onclick = () => openLaptopModal(device.machine_id);
                 div.innerHTML = `
-                    <div class="laptop-status ${isRecent ? 'active' : 'inactive'}" title="${isRecent ? 'Booted in the last 24 hours' : 'Not seen recently'}"></div>
+                    <div class="laptop-status ${isActive ? 'active' : 'inactive'}" title="${isActive ? 'Currently running' : 'Shut down'}"></div>
                     <div class="laptop-info">
                         <div class="laptop-hostname">${escapeHtml(device.hostname || 'Unknown')}</div>
                         <div class="laptop-details">
@@ -959,6 +1044,96 @@
         } catch (e) {
             container.innerHTML = '<div class="laptops-empty">Could not load device list.</div>';
         }
+    }
+
+    // --- Laptop detail modal ---
+
+    async function openLaptopModal(machineId) {
+        const modal = document.getElementById('laptop-modal');
+        const sessionsEl = document.getElementById('modal-sessions');
+        const infoEl = document.getElementById('modal-device-info');
+
+        document.getElementById('modal-hostname').textContent = 'Loading...';
+        infoEl.innerHTML = '';
+        sessionsEl.innerHTML = '<div class="laptops-loading">Loading usage log...</div>';
+        modal.style.display = 'flex';
+
+        try {
+            const response = await fetch(`${DEVICE_API}/api.php?action=device&id=${encodeURIComponent(machineId)}`);
+            if (!response.ok) throw new Error('Could not load device');
+            const device = await response.json();
+
+            document.getElementById('modal-hostname').textContent = device.hostname || 'Unknown';
+
+            infoEl.innerHTML = `
+                <div class="text-muted" style="line-height:1.6;">
+                    ${device.cpu ? escapeHtml(device.cpu) : 'Unknown CPU'}
+                    &middot; ${device.ram_gb ? device.ram_gb + ' GB RAM' : '? RAM'}
+                    &middot; ${device.disk_gb ? device.disk_gb + ' GB disk' : '? disk'}
+                    ${device.os_version ? '<br>' + escapeHtml(device.os_version) : ''}
+                    ${device.serial ? '<br>Serial: ' + escapeHtml(device.serial) : ''}
+                    ${device.mac_address ? ' &middot; MAC: ' + escapeHtml(device.mac_address) : ''}
+                </div>
+            `;
+
+            if (!device.boots || device.boots.length === 0) {
+                sessionsEl.innerHTML = '<div class="laptops-empty">No usage records yet.</div>';
+                return;
+            }
+
+            let html = `<table class="session-table">
+                <thead>
+                    <tr>
+                        <th>Started</th>
+                        <th>Shut Down</th>
+                        <th>Duration</th>
+                        <th>IP Address</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+            device.boots.forEach(boot => {
+                const bootTime = new Date(boot.timestamp + 'Z');
+                const bootStr = bootTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                    + ' ' + bootTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+                let shutdownStr = '';
+                let durationStr = '';
+
+                if (boot.shutdown_time) {
+                    const shutTime = new Date(boot.shutdown_time + 'Z');
+                    shutdownStr = shutTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                        + ' ' + shutTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+                    const durMs = shutTime - bootTime;
+                    if (durMs > 0) {
+                        const mins = Math.floor(durMs / 60000);
+                        const hours = Math.floor(mins / 60);
+                        const remMins = mins % 60;
+                        durationStr = hours > 0 ? hours + 'h ' + remMins + 'm' : remMins + 'm';
+                    }
+                } else {
+                    shutdownStr = '<span class="session-active"></span>Running';
+                }
+
+                html += `<tr>
+                    <td>${bootStr}</td>
+                    <td>${shutdownStr}</td>
+                    <td>${durationStr || '—'}</td>
+                    <td>${boot.ip ? escapeHtml(boot.ip) : '—'}</td>
+                </tr>`;
+            });
+
+            html += '</tbody></table>';
+            sessionsEl.innerHTML = html;
+
+        } catch (e) {
+            sessionsEl.innerHTML = '<div class="laptops-empty">Could not load device details.</div>';
+        }
+    }
+
+    function closeLaptopModal() {
+        document.getElementById('laptop-modal').style.display = 'none';
     }
 
     // --- Auto-restore session ---

@@ -44,9 +44,16 @@ function getDb(): PDO {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         machine_id TEXT NOT NULL,
         timestamp TEXT DEFAULT (datetime('now')),
+        shutdown_time TEXT,
         ip TEXT,
         FOREIGN KEY (machine_id) REFERENCES devices(machine_id)
     )");
+
+    // Add shutdown_time column if upgrading from older schema
+    $cols = $db->query("PRAGMA table_info(boots)")->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array('shutdown_time', $cols)) {
+        $db->exec("ALTER TABLE boots ADD COLUMN shutdown_time TEXT");
+    }
 
     $db->exec("CREATE INDEX IF NOT EXISTS idx_boots_machine ON boots(machine_id, timestamp DESC)");
 
@@ -71,6 +78,9 @@ try {
             break;
         case 'save-message':
             handleSaveMessage();
+            break;
+        case 'shutdown':
+            handleShutdown();
             break;
         case 'upload-wallpaper':
             handleUploadWallpaper();
@@ -160,6 +170,44 @@ function handleRegister(): void {
     echo json_encode(['status' => 'ok']);
 }
 
+function handleShutdown(): void {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['error' => 'POST required']);
+        return;
+    }
+
+    $input = json_decode(file_get_contents('php://input'), true);
+    if (!$input) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid JSON']);
+        return;
+    }
+
+    if (($input['secret'] ?? '') !== API_SECRET) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Invalid secret']);
+        return;
+    }
+
+    $machineId = $input['machine_id'] ?? '';
+    if (empty($machineId)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'machine_id required']);
+        return;
+    }
+
+    $db = getDb();
+
+    // Set shutdown_time on the most recent boot for this device
+    $stmt = $db->prepare("UPDATE boots SET shutdown_time = datetime('now')
+        WHERE id = (SELECT id FROM boots WHERE machine_id = :mid ORDER BY timestamp DESC LIMIT 1)
+        AND shutdown_time IS NULL");
+    $stmt->execute([':mid' => $machineId]);
+
+    echo json_encode(['status' => 'ok']);
+}
+
 function handleDevices(): void {
     $db = getDb();
 
@@ -167,7 +215,8 @@ function handleDevices(): void {
         SELECT d.*,
             (SELECT COUNT(*) FROM boots b WHERE b.machine_id = d.machine_id) as boot_count,
             (SELECT b.ip FROM boots b WHERE b.machine_id = d.machine_id ORDER BY b.timestamp DESC LIMIT 1) as last_ip,
-            (SELECT b.timestamp FROM boots b WHERE b.machine_id = d.machine_id ORDER BY b.timestamp DESC LIMIT 1) as last_boot
+            (SELECT b.timestamp FROM boots b WHERE b.machine_id = d.machine_id ORDER BY b.timestamp DESC LIMIT 1) as last_boot,
+            (SELECT b.shutdown_time FROM boots b WHERE b.machine_id = d.machine_id ORDER BY b.timestamp DESC LIMIT 1) as last_shutdown
         FROM devices d
         ORDER BY last_seen DESC
     ")->fetchAll(PDO::FETCH_ASSOC);
@@ -195,7 +244,7 @@ function handleDevice(): void {
         return;
     }
 
-    $stmt = $db->prepare("SELECT timestamp, ip FROM boots WHERE machine_id = :mid ORDER BY timestamp DESC LIMIT 100");
+    $stmt = $db->prepare("SELECT timestamp, shutdown_time, ip FROM boots WHERE machine_id = :mid ORDER BY timestamp DESC LIMIT 100");
     $stmt->execute([':mid' => $machineId]);
     $device['boots'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
 

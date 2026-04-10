@@ -675,6 +675,51 @@ register_device() {
 }
 
 # ============================================================
+# 13. Shutdown Tracking
+# ============================================================
+setup_shutdown_tracking() {
+    log_info "Setting up shutdown tracking..."
+
+    local script_path="/usr/local/bin/4youth-shutdown-notify.sh"
+    local service_path="/etc/systemd/system/4youth-shutdown.service"
+
+    # Create the shutdown notification script
+    sudo tee "$script_path" > /dev/null << 'SCRIPT'
+#!/usr/bin/env bash
+MACHINE_ID=$(cat /etc/machine-id 2>/dev/null || echo "")
+[ -z "$MACHINE_ID" ] && exit 0
+curl -sL -X POST "https://popos.4youth.org.uk/api.php?action=shutdown" \
+    -H "Content-Type: application/json" \
+    -d "{\"secret\":\"4youth-kiosk-2026\",\"machine_id\":\"${MACHINE_ID}\"}" \
+    --max-time 5 2>/dev/null || true
+SCRIPT
+    sudo chmod +x "$script_path"
+
+    # Create a systemd service that runs on shutdown/reboot
+    sudo tee "$service_path" > /dev/null << 'EOF'
+[Unit]
+Description=4Youth Kiosk Shutdown Tracker
+DefaultDependencies=no
+Before=shutdown.target reboot.target halt.target
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/4youth-shutdown-notify.sh
+TimeoutStartSec=10
+
+[Install]
+WantedBy=shutdown.target reboot.target halt.target
+EOF
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable 4youth-shutdown.service 2>/dev/null || true
+
+    log_success "Shutdown tracking configured"
+}
+
+# ============================================================
 # Update System (check, prompt, apply)
 # ============================================================
 check_for_updates() {
@@ -887,6 +932,12 @@ unlock_desktop() {
     sudo rm -f /etc/opt/chrome/policies/managed/4youth-policy.json 2>/dev/null || true
     log_info "Removed Chrome managed policies"
 
+    # Remove shutdown tracking
+    sudo systemctl disable 4youth-shutdown.service 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/4youth-shutdown.service 2>/dev/null || true
+    sudo rm -f /usr/local/bin/4youth-shutdown-notify.sh 2>/dev/null || true
+    log_info "Removed shutdown tracking"
+
     log_success "Desktop unlocked. Log out and back in for full effect."
 }
 
@@ -907,6 +958,7 @@ main() {
                 if sudo -n true 2>/dev/null; then
                     install_assets
                     register_device
+                    setup_shutdown_tracking
                 else
                     log_info "Skipping asset install and device registration (no sudo)"
                 fi
@@ -972,6 +1024,7 @@ main() {
     set_wallpaper
     setup_team_message
     register_device
+    setup_shutdown_tracking
     setup_login_check
 
     echo
