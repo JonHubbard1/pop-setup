@@ -4,6 +4,11 @@
  * Opened by Chrome on each kiosk laptop at login.
  */
 
+// Prevent Chrome from caching stale messages
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+
 $file = __DIR__ . '/data/team-message.txt';
 $message = file_exists($file) ? trim(file_get_contents($file)) : '';
 

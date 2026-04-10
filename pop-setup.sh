@@ -600,12 +600,13 @@ setup_team_message() {
     rm -f "$CONFIG_DIR/team-message.html"
 
     # Create autostart entry to show message on login (server-rendered, always current)
+    # Use a cache-busting timestamp parameter so Chrome never shows a stale cached page
     mkdir -p "$autostart_dir"
     cat > "$autostart_file" << EOF
 [Desktop Entry]
 Type=Application
 Name=4Youth Team Message
-Exec=/usr/bin/google-chrome-stable --app=${message_url} --password-store=basic --no-first-run --no-default-browser-check --window-size=650,500
+Exec=/usr/bin/google-chrome-stable --app=${message_url}?t=$(date +%s) --password-store=basic --no-first-run --no-default-browser-check --window-size=650,500
 StartupWMClass=4youth-team-message
 Terminal=false
 X-GNOME-Autostart-enabled=true
@@ -895,8 +896,11 @@ main() {
         case $1 in
             --check-update)
                 check_not_root
-                # Always refresh config and team message on login
+                # Always refresh config, shortcuts, and team message on login
                 download_config
+                install_assets
+                create_desktop_shortcuts
+                set_wallpaper
                 setup_team_message
                 register_device
                 # Then check for script updates
