@@ -244,9 +244,44 @@ function handleDevice(): void {
         return;
     }
 
-    $stmt = $db->prepare("SELECT timestamp, shutdown_time, ip FROM boots WHERE machine_id = :mid ORDER BY timestamp DESC LIMIT 100");
-    $stmt->execute([':mid' => $machineId]);
+    // Pagination
+    $page = max(1, intval($_GET['page'] ?? 1));
+    $perPage = max(1, min(100, intval($_GET['per_page'] ?? 10)));
+    $offset = ($page - 1) * $perPage;
+
+    // Date filtering
+    $dateFrom = $_GET['from'] ?? '';
+    $dateTo = $_GET['to'] ?? '';
+
+    $where = 'WHERE machine_id = :mid';
+    $params = [':mid' => $machineId];
+
+    if ($dateFrom !== '') {
+        $where .= ' AND timestamp >= :from_date';
+        $params[':from_date'] = $dateFrom . ' 00:00:00';
+    }
+    if ($dateTo !== '') {
+        $where .= ' AND timestamp <= :to_date';
+        $params[':to_date'] = $dateTo . ' 23:59:59';
+    }
+
+    // Get total count for pagination
+    $countStmt = $db->prepare("SELECT COUNT(*) FROM boots $where");
+    $countStmt->execute($params);
+    $totalCount = (int) $countStmt->fetchColumn();
+
+    // Fetch page of boots
+    $sql = "SELECT timestamp, shutdown_time, ip FROM boots $where ORDER BY timestamp DESC LIMIT $perPage OFFSET $offset";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
     $device['boots'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $device['pagination'] = [
+        'page' => $page,
+        'per_page' => $perPage,
+        'total' => $totalCount,
+        'total_pages' => max(1, ceil($totalCount / $perPage)),
+    ];
 
     echo json_encode($device);
 }

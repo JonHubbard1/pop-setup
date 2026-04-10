@@ -404,6 +404,28 @@
         }
         .laptop-item { cursor: pointer; transition: border-color 0.2s; }
         .laptop-item:hover { border-color: #1DA1D4; }
+        .filter-row {
+            display: flex;
+            gap: 0.6rem;
+            align-items: flex-end;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #eee;
+        }
+        .filter-row .form-group { margin-bottom: 0; flex: 1; min-width: 130px; }
+        .filter-row input[type="date"] { padding: 0.5rem 0.6rem; font-size: 0.88rem; }
+        .filter-row .btn { flex-shrink: 0; padding: 0.5rem 1rem; font-size: 0.88rem; }
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 1rem;
+            font-size: 0.88rem;
+        }
+        .pagination .btn { padding: 0.4rem 0.8rem; font-size: 0.85rem; }
+        .pagination .page-info { color: #666; }
 
         /* Info banner */
         .info-banner {
@@ -562,7 +584,20 @@
         <div class="modal-body">
             <div id="modal-device-info" style="margin-bottom:1.2rem;"></div>
             <h3 style="font-size:1rem; margin-bottom:0.6rem;">Usage Log</h3>
+            <div class="filter-row">
+                <div class="form-group">
+                    <label for="filter-from">From</label>
+                    <input type="date" id="filter-from">
+                </div>
+                <div class="form-group">
+                    <label for="filter-to">To</label>
+                    <input type="date" id="filter-to">
+                </div>
+                <button class="btn btn-primary" onclick="applyFilter()">Filter</button>
+                <button class="btn btn-secondary" onclick="clearFilter()">Clear</button>
+            </div>
             <div id="modal-sessions"></div>
+            <div id="modal-pagination" class="pagination"></div>
         </div>
     </div>
 </div>
@@ -1048,24 +1083,44 @@
 
     // --- Laptop detail modal ---
 
-    async function openLaptopModal(machineId) {
-        const modal = document.getElementById('laptop-modal');
-        const sessionsEl = document.getElementById('modal-sessions');
-        const infoEl = document.getElementById('modal-device-info');
+    let modalMachineId = null;
+    let modalPage = 1;
 
+    async function openLaptopModal(machineId) {
+        modalMachineId = machineId;
+        modalPage = 1;
+        document.getElementById('filter-from').value = '';
+        document.getElementById('filter-to').value = '';
+
+        const modal = document.getElementById('laptop-modal');
         document.getElementById('modal-hostname').textContent = 'Loading...';
-        infoEl.innerHTML = '';
-        sessionsEl.innerHTML = '<div class="laptops-loading">Loading usage log...</div>';
+        document.getElementById('modal-device-info').innerHTML = '';
+        document.getElementById('modal-sessions').innerHTML = '<div class="laptops-loading">Loading usage log...</div>';
+        document.getElementById('modal-pagination').innerHTML = '';
         modal.style.display = 'flex';
 
+        await loadModalPage();
+    }
+
+    async function loadModalPage() {
+        const sessionsEl = document.getElementById('modal-sessions');
+        const paginationEl = document.getElementById('modal-pagination');
+
+        const filterFrom = document.getElementById('filter-from').value;
+        const filterTo = document.getElementById('filter-to').value;
+
+        let url = `${DEVICE_API}/api.php?action=device&id=${encodeURIComponent(modalMachineId)}&page=${modalPage}&per_page=10`;
+        if (filterFrom) url += `&from=${filterFrom}`;
+        if (filterTo) url += `&to=${filterTo}`;
+
         try {
-            const response = await fetch(`${DEVICE_API}/api.php?action=device&id=${encodeURIComponent(machineId)}`);
+            const response = await fetch(url);
             if (!response.ok) throw new Error('Could not load device');
             const device = await response.json();
 
             document.getElementById('modal-hostname').textContent = device.hostname || 'Unknown';
 
-            infoEl.innerHTML = `
+            document.getElementById('modal-device-info').innerHTML = `
                 <div class="text-muted" style="line-height:1.6;">
                     ${device.cpu ? escapeHtml(device.cpu) : 'Unknown CPU'}
                     &middot; ${device.ram_gb ? device.ram_gb + ' GB RAM' : '? RAM'}
@@ -1077,7 +1132,8 @@
             `;
 
             if (!device.boots || device.boots.length === 0) {
-                sessionsEl.innerHTML = '<div class="laptops-empty">No usage records yet.</div>';
+                sessionsEl.innerHTML = '<div class="laptops-empty">No usage records found.</div>';
+                paginationEl.innerHTML = '';
                 return;
             }
 
@@ -1127,9 +1183,39 @@
             html += '</tbody></table>';
             sessionsEl.innerHTML = html;
 
+            // Pagination controls
+            const pg = device.pagination;
+            if (pg.total_pages > 1) {
+                paginationEl.innerHTML = `
+                    <button class="btn btn-secondary" onclick="goToPage(${pg.page - 1})" ${pg.page <= 1 ? 'disabled' : ''}>Previous</button>
+                    <span class="page-info">Page ${pg.page} of ${pg.total_pages} (${pg.total} records)</span>
+                    <button class="btn btn-secondary" onclick="goToPage(${pg.page + 1})" ${pg.page >= pg.total_pages ? 'disabled' : ''}>Next</button>
+                `;
+            } else {
+                paginationEl.innerHTML = pg.total > 0 ? `<span class="page-info">${pg.total} record${pg.total !== 1 ? 's' : ''}</span>` : '';
+            }
+
         } catch (e) {
             sessionsEl.innerHTML = '<div class="laptops-empty">Could not load device details.</div>';
+            paginationEl.innerHTML = '';
         }
+    }
+
+    function goToPage(page) {
+        modalPage = page;
+        loadModalPage();
+    }
+
+    function applyFilter() {
+        modalPage = 1;
+        loadModalPage();
+    }
+
+    function clearFilter() {
+        document.getElementById('filter-from').value = '';
+        document.getElementById('filter-to').value = '';
+        modalPage = 1;
+        loadModalPage();
     }
 
     function closeLaptopModal() {
