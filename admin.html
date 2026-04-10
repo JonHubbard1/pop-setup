@@ -176,19 +176,32 @@
         }
 
         /* Wallpaper */
-        .wallpaper-options { display: flex; flex-direction: column; gap: 0.8rem; }
-        .wallpaper-option {
+        .wallpaper-row {
+            display: flex;
+            align-items: flex-end;
+            gap: 0.8rem;
+            flex-wrap: wrap;
+        }
+        .wallpaper-row .form-group { flex: 1; min-width: 200px; margin-bottom: 0; }
+        .wallpaper-upload {
             display: flex;
             align-items: center;
             gap: 0.6rem;
-            padding: 0.8rem;
-            border: 2px solid #eee;
+            padding: 1rem;
+            border: 2px dashed #ddd;
             border-radius: 8px;
-            cursor: pointer;
-            transition: border-color 0.2s;
+            margin-top: 1rem;
+            background: #fafafa;
         }
-        .wallpaper-option:hover { background: #f8f9fa; }
-        .wallpaper-option.selected { border-color: #1DA1D4; background: #f0f9fd; }
+        .wallpaper-upload input[type="file"] { font-size: 0.9rem; }
+        .wallpaper-item {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.5rem 0;
+            font-size: 0.9rem;
+        }
+        .wallpaper-item .text-muted { margin-left: auto; }
 
         /* Save bar */
         .save-bar {
@@ -422,21 +435,19 @@
         <div class="card">
             <h2>Desktop Background</h2>
             <p class="card-desc">Choose the desktop wallpaper shown on all laptops.</p>
-            <div class="wallpaper-options">
-                <label class="wallpaper-option" id="wp-brand">
-                    <input type="radio" name="wallpaper" value="brand-colour" onchange="wallpaperChanged()">
-                    <div>
-                        <strong>4Youth Blue</strong>
-                        <br><span class="text-muted">Solid 4Youth brand colour</span>
-                    </div>
-                </label>
-                <label class="wallpaper-option" id="wp-image">
-                    <input type="radio" name="wallpaper" value="wallpaper.png" onchange="wallpaperChanged()">
-                    <div>
-                        <strong>Custom Wallpaper</strong>
-                        <br><span class="text-muted">Uses a custom wallpaper image (contact your IT support to change the image)</span>
-                    </div>
-                </label>
+            <div class="form-group">
+                <label for="wallpaper-select">Wallpaper</label>
+                <select id="wallpaper-select" onchange="wallpaperChanged()">
+                    <option value="brand-colour">4Youth Blue (default)</option>
+                </select>
+            </div>
+            <div class="wallpaper-upload">
+                <div style="flex:1;">
+                    <label for="wallpaper-file" style="margin-bottom:0.3rem;">Upload a new wallpaper</label>
+                    <input type="file" id="wallpaper-file" accept="image/png,image/jpeg,image/webp">
+                    <div class="text-muted mt-1">PNG, JPEG, or WebP — max 10MB</div>
+                </div>
+                <button class="btn btn-success" onclick="uploadWallpaper()">Upload</button>
             </div>
         </div>
 
@@ -520,6 +531,7 @@
             adminPassword = currentConfig.admin_password;
             loadDevices();
             loadTeamMessage();
+            loadWallpapers();
 
             document.getElementById('login-panel').style.display = 'none';
             document.getElementById('admin-panel').style.display = 'block';
@@ -739,20 +751,87 @@
 
     // --- Wallpaper ---
 
+    let wallpaperList = [];
+
+    async function loadWallpapers() {
+        try {
+            const response = await fetch(`${DEVICE_API}/api.php?action=list-wallpapers`);
+            if (!response.ok) throw new Error('Could not load wallpapers');
+            wallpaperList = await response.json();
+        } catch (e) {
+            wallpaperList = [];
+        }
+        renderWallpaper();
+    }
+
     function renderWallpaper() {
+        const select = document.getElementById('wallpaper-select');
         const value = currentConfig.wallpaper || 'brand-colour';
-        document.querySelectorAll('input[name="wallpaper"]').forEach(radio => {
-            radio.checked = (radio.value === value);
-            const label = radio.closest('.wallpaper-option');
-            label.classList.toggle('selected', radio.checked);
+
+        // Keep the default option, rebuild the rest
+        select.innerHTML = '<option value="brand-colour">4Youth Blue (default)</option>';
+        wallpaperList.forEach(filename => {
+            const name = filename.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
+            const displayName = name.charAt(0).toUpperCase() + name.slice(1);
+            select.innerHTML += `<option value="${escapeHtml(filename)}">${escapeHtml(displayName)}</option>`;
         });
+
+        select.value = value;
+        // If the saved value no longer exists, fall back to brand colour
+        if (select.value !== value) {
+            select.value = 'brand-colour';
+            if (currentConfig.wallpaper !== 'brand-colour') {
+                currentConfig.wallpaper = 'brand-colour';
+                checkChanges();
+            }
+        }
     }
 
     function wallpaperChanged() {
-        const value = document.querySelector('input[name="wallpaper"]:checked').value;
-        currentConfig.wallpaper = value;
-        renderWallpaper();
+        currentConfig.wallpaper = document.getElementById('wallpaper-select').value;
         checkChanges();
+    }
+
+    async function uploadWallpaper() {
+        const fileInput = document.getElementById('wallpaper-file');
+        if (!fileInput.files.length) {
+            showToast('Please select an image to upload', 'error');
+            return;
+        }
+
+        const file = fileInput.files[0];
+        if (file.size > 10 * 1024 * 1024) {
+            showToast('File is too large (max 10MB)', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('wallpaper', file);
+        formData.append('password', adminPassword);
+
+        try {
+            const response = await fetch(`${DEVICE_API}/api.php?action=upload-wallpaper`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Upload failed');
+            }
+
+            const result = await response.json();
+            fileInput.value = '';
+            showToast('Wallpaper uploaded', 'success');
+
+            // Reload the list and select the new wallpaper
+            await loadWallpapers();
+            currentConfig.wallpaper = result.filename;
+            document.getElementById('wallpaper-select').value = result.filename;
+            checkChanges();
+        } catch (e) {
+            showToast(e.message || 'Upload failed', 'error');
+        }
     }
 
     // --- Render all ---
@@ -893,6 +972,7 @@
             adminPassword = currentConfig.admin_password;
             loadDevices();
             loadTeamMessage();
+            loadWallpapers();
 
             document.getElementById('login-panel').style.display = 'none';
             document.getElementById('admin-panel').style.display = 'block';

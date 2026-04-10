@@ -72,6 +72,18 @@ try {
         case 'save-message':
             handleSaveMessage();
             break;
+        case 'upload-wallpaper':
+            handleUploadWallpaper();
+            break;
+        case 'list-wallpapers':
+            handleListWallpapers();
+            break;
+        case 'delete-wallpaper':
+            handleDeleteWallpaper();
+            break;
+        case 'wallpaper-image':
+            handleWallpaperImage();
+            break;
         default:
             http_response_code(400);
             echo json_encode(['error' => 'Unknown action']);
@@ -198,6 +210,172 @@ function handleGetMessage(): void {
     $file = getMessageFile();
     $message = file_exists($file) ? file_get_contents($file) : '';
     echo json_encode(['message' => $message]);
+}
+
+function getWallpaperDir(): string {
+    $dir = __DIR__ . '/data/wallpapers';
+    if (!is_dir($dir)) {
+        mkdir($dir, 0750, true);
+    }
+    return $dir;
+}
+
+function authenticateAdmin(): bool {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $password = $input['password'] ?? ($_POST['password'] ?? '');
+
+    $configPath = __DIR__ . '/config.json';
+    $config = json_decode(file_get_contents($configPath), true);
+    $adminPassword = $config['admin_password'] ?? '';
+
+    return !empty($adminPassword) && $password === $adminPassword;
+}
+
+function handleUploadWallpaper(): void {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['error' => 'POST required']);
+        return;
+    }
+
+    // Authenticate using password from POST field
+    $configPath = __DIR__ . '/config.json';
+    $config = json_decode(file_get_contents($configPath), true);
+    $adminPassword = $config['admin_password'] ?? '';
+
+    if (empty($adminPassword) || ($_POST['password'] ?? '') !== $adminPassword) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Invalid password']);
+        return;
+    }
+
+    if (!isset($_FILES['wallpaper']) || $_FILES['wallpaper']['error'] !== UPLOAD_ERR_OK) {
+        http_response_code(400);
+        echo json_encode(['error' => 'No file uploaded']);
+        return;
+    }
+
+    $file = $_FILES['wallpaper'];
+
+    // Validate file type
+    $allowedTypes = ['image/png', 'image/jpeg', 'image/webp'];
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mimeType = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+
+    if (!in_array($mimeType, $allowedTypes)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Only PNG, JPEG, and WebP images are allowed']);
+        return;
+    }
+
+    // Limit file size to 10MB
+    if ($file['size'] > 10 * 1024 * 1024) {
+        http_response_code(400);
+        echo json_encode(['error' => 'File too large (max 10MB)']);
+        return;
+    }
+
+    // Sanitise filename
+    $originalName = pathinfo($file['name'], PATHINFO_FILENAME);
+    $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
+    $safeName = preg_replace('/[^a-zA-Z0-9_-]/', '-', $originalName);
+    $safeName = trim($safeName, '-');
+    if (empty($safeName)) $safeName = 'wallpaper';
+    $filename = $safeName . '.' . strtolower($extension);
+
+    $dir = getWallpaperDir();
+
+    // Avoid overwriting — append number if needed
+    $dest = $dir . '/' . $filename;
+    $counter = 1;
+    while (file_exists($dest)) {
+        $filename = $safeName . '-' . $counter . '.' . strtolower($extension);
+        $dest = $dir . '/' . $filename;
+        $counter++;
+    }
+
+    if (!move_uploaded_file($file['tmp_name'], $dest)) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Failed to save file']);
+        return;
+    }
+
+    echo json_encode(['status' => 'ok', 'filename' => $filename]);
+}
+
+function handleListWallpapers(): void {
+    $dir = getWallpaperDir();
+    $files = [];
+
+    foreach (glob($dir . '/*.{png,jpg,jpeg,webp}', GLOB_BRACE) as $path) {
+        $files[] = basename($path);
+    }
+
+    sort($files);
+    echo json_encode($files);
+}
+
+function handleDeleteWallpaper(): void {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['error' => 'POST required']);
+        return;
+    }
+
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    // Authenticate
+    $configPath = __DIR__ . '/config.json';
+    $config = json_decode(file_get_contents($configPath), true);
+    $adminPassword = $config['admin_password'] ?? '';
+
+    if (empty($adminPassword) || ($input['password'] ?? '') !== $adminPassword) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Invalid password']);
+        return;
+    }
+
+    $filename = $input['filename'] ?? '';
+    if (empty($filename) || str_contains($filename, '/') || str_contains($filename, '..')) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid filename']);
+        return;
+    }
+
+    $path = getWallpaperDir() . '/' . $filename;
+    if (!file_exists($path)) {
+        http_response_code(404);
+        echo json_encode(['error' => 'File not found']);
+        return;
+    }
+
+    unlink($path);
+    echo json_encode(['status' => 'ok']);
+}
+
+function handleWallpaperImage(): void {
+    $filename = $_GET['file'] ?? '';
+    if (empty($filename) || str_contains($filename, '/') || str_contains($filename, '..')) {
+        http_response_code(400);
+        echo 'Invalid filename';
+        return;
+    }
+
+    $path = getWallpaperDir() . '/' . $filename;
+    if (!file_exists($path)) {
+        http_response_code(404);
+        echo 'Not found';
+        return;
+    }
+
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $path);
+    finfo_close($finfo);
+
+    header('Content-Type: ' . $mime);
+    header('Content-Length: ' . filesize($path));
+    readfile($path);
 }
 
 function handleSaveMessage(): void {

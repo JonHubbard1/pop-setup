@@ -297,12 +297,14 @@ install_assets() {
     wallpaper_setting=$(jq -r '.wallpaper // "brand-colour"' "$CONFIG_FILE")
 
     if [[ "$wallpaper_setting" != "brand-colour" ]]; then
-        curl -sL "${ASSETS_URL}/${wallpaper_setting}" -o "/tmp/wallpaper.png"
-        if [[ -s "/tmp/wallpaper.png" ]]; then
-            sudo mv "/tmp/wallpaper.png" "$WALLPAPER_DIR/wallpaper.png"
-            log_info "Installed wallpaper"
+        # Download from the server wallpaper API
+        local wp_url="https://popos.4youth.org.uk/api.php?action=wallpaper-image&file=${wallpaper_setting}"
+        curl -sL "$wp_url" -o "/tmp/wallpaper-current"
+        if [[ -s "/tmp/wallpaper-current" ]]; then
+            sudo mv "/tmp/wallpaper-current" "$WALLPAPER_DIR/wallpaper.png"
+            log_info "Installed wallpaper: $wallpaper_setting"
         else
-            rm -f "/tmp/wallpaper.png"
+            rm -f "/tmp/wallpaper-current"
             log_warn "Wallpaper image not found — will fall back to brand colour"
         fi
     else
